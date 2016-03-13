@@ -1,0 +1,16 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <MSBuildAllProjects>$(MSBuildAllProjects);$(MSBuildThisFileFullPath)</MSBuildAllProjects>
+    <HasSharedItems>true</HasSharedItems>
+    <SharedGUID>e62a7ba6-14a0-4de8-927f-4a9af4279ff3</SharedGUID>
+  </PropertyGroup>
+  <PropertyGroup Label="Configuration">
+    <Import_RootNamespace>Android.Utilities</Import_RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)Data\AndroidDatabaseConnection.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)DividerItemDecoration.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Layout\WrapLayoutManager.cs" />
+  </ItemGroup>
+</Project>
