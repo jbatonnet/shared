@@ -150,7 +150,7 @@ namespace Python
                 if (type == typeof(ulong)) { result = unsigned; return true; }
             }
 
-            if (PySequence_Check(pointer))
+            if (pythonType != PythonString.Type && PySequence_Check(pointer))
             {
                 if (type.IsArray)
                 {
@@ -323,7 +323,11 @@ namespace Python
             {
                 IntPtr pythonString = PyObject_Str(Pointer);
                 IntPtr cString = PyString_AsString(pythonString);
-                return Marshal.PtrToStringAnsi(cString);
+
+                if (cString == IntPtr.Zero)
+                    return null;
+                else
+                    return Marshal.PtrToStringAnsi(cString);
             }
         }
         public bool Equals(PythonObject other)
@@ -886,6 +890,14 @@ namespace Python
                     return (PythonDictionary)PyObject_GetAttrString(Pointer, "__dict__");
             }
         }
+        public PythonTuple Bases
+        {
+            get
+            {
+                using (PythonException.Checker)
+                    return (PythonTuple)PyObject_GetAttrString(Pointer, "__bases__");
+            }
+        }
 
         private PythonDictionary dict;
 
@@ -896,42 +908,23 @@ namespace Python
             Pointer = PyClass_New(IntPtr.Zero, dict, PyString_FromString(name));
         }
 
-        public void AddMethod(string name, OneArgPythonObjectFunction function, PythonFunctionType type, string documentation = null)
-        {
-            using (PythonException.Checker)
-            {
-                PythonFunction pythonFunction = new PythonFunction(name, a => function(a), type, documentation);
-                PythonMethod pythonMethod = new PythonMethod(this, pythonFunction);
-
-                PyDict_SetItemString(dict, name, pythonMethod);
-            }
-        }
-        public void AddMethod(string name, OneArgPythonObjectFunction function, string documentation = null)
-        {
-            AddMethod(name, function, PythonFunctionType.VarArgs, documentation);
-        }
-        public void AddMethod(string name, TwoArgsPythonObjectFunction function, PythonFunctionType type, string documentation = null)
-        {
-            using (PythonException.Checker)
-            {
-                PythonFunction pythonFunction = new PythonFunction(name, (a, b) => function(a, b), type, documentation);
-                PythonMethod pythonMethod = new PythonMethod(this, pythonFunction);
-
-                PyDict_SetItemString(dict, name, pythonMethod);
-            }
-        }
         public void AddMethod(string name, TwoArgsPythonObjectFunction function, string documentation = null)
         {
-            AddMethod(name, function, PythonFunctionType.VarArgs, documentation);
-        }
+            using (PythonException.Checker)
+            {
+                PythonFunction pythonFunction = new PythonFunction(name, (a, b) => function(PyTuple_GetItem(b, 0), PyTuple_GetSlice(b, 1, PyTuple_Size(b))), PythonFunctionType.VarArgs, documentation);
+                PythonMethod pythonMethod = new PythonMethod(this, pythonFunction);
 
+                PyDict_SetItemString(dict, name, pythonMethod);
+            }
+        }
         public void AddProperty(string name, TwoArgsPythonObjectFunction getter, TwoArgsPythonObjectFunction setter = null)
         {
-            PythonMethod getMethod = new PythonMethod(this, new PythonFunction("get_" + name, (a, b) => getter(a, b)));
+            PythonMethod getMethod = new PythonMethod(this, new PythonFunction("get_" + name, (a, b) => getter(PyTuple_GetItem(b, 0), PyTuple_GetSlice(b, 1, PyTuple_Size(b)))));
             PythonMethod setMethod = null;
 
             if (setter != null)
-                setMethod = new PythonMethod(this, new PythonFunction("set_" + name, (a, b) => getter(a, b)));
+                setMethod = new PythonMethod(this, new PythonFunction("set_" + name, (a, b) => setter(PyTuple_GetItem(b, 0), PyTuple_GetSlice(b, 1, PyTuple_Size(b)))));
 
             PythonType propertyType = PythonModule.Builtin.GetAttribute("property") as PythonType;
 
@@ -1064,7 +1057,7 @@ namespace Python
 
         private List<string> stackTrace = new List<string>();
 
-        internal PythonException(IntPtr type, IntPtr value, IntPtr traceback) : base(GetExceptionMessage(value))
+        internal PythonException(IntPtr type, IntPtr value, IntPtr traceback) : base(GetExceptionMessage(type, value))
         {
             while (traceback != IntPtr.Zero)
             {
@@ -1090,9 +1083,9 @@ namespace Python
             string exceptionMessage = Marshal.PtrToStringAnsi(PyString_AsString(value));
         }
 
-        private static string GetExceptionMessage(IntPtr value)
+        private static string GetExceptionMessage(IntPtr type, IntPtr value)
         {
-            return Marshal.PtrToStringAnsi(PyString_AsString(value));
+            return Marshal.PtrToStringAnsi(PyString_AsString(PyObject_Str(value)));
         }
     }
 }

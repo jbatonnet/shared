@@ -37,22 +37,41 @@ namespace Python
             else
                 throw new ArgumentNullException("The specified pointer cannot be converted to .NET type");
 
+            // Convert base type
+            if (baseType == null)
+            {
+                if (pythonObject is PythonClass)
+                {
+                    PythonTuple bases = (pythonObject as PythonClass).Bases;
+                    int basesCount = bases.Size;
+
+                    if (basesCount > 1)
+                        throw new NotSupportedException("Cannot convert python type with multiple base classes");
+                    else if (basesCount == 1)
+                        baseType = FromPython(bases[0]);
+                }
+            }
+
             // Setup builders
             AssemblyName assemblyName = new AssemblyName(typeName + "_Assembly");
             AssemblyBuilder assemblyBuilder = AppDomain.CurrentDomain.DefineDynamicAssembly(assemblyName, AssemblyBuilderAccess.RunAndSave);
-            ModuleBuilder module = assemblyBuilder.DefineDynamicModule(typeName + "_Module");
+            ModuleBuilder module = assemblyBuilder.DefineDynamicModule(typeName + "_Module"
+#if DEBUG
+                , typeName + ".dll"
+#endif
+                );
 
             // Find class specs
             if (baseType == null)
                 baseType = typeof(object);
 
             // Proxy methods
-            MethodInfo constructorProxy = typeof(TypeManager).GetMethod(nameof(ConstructorProxy));
-            MethodInfo methodProxy = typeof(TypeManager).GetMethod(nameof(MethodProxy));
+            MethodInfo constructorProxy = typeof(FromPythonHelper).GetMethod(nameof(FromPythonHelper.ConstructorProxy));
+            MethodInfo methodProxy = typeof(FromPythonHelper).GetMethod(nameof(FromPythonHelper.MethodProxy));
 
             // Build type
             TypeBuilder typeBuilder = module.DefineType(typeName, TypeAttributes.Public | TypeAttributes.Class, baseType);
-            FieldBuilder fieldBuilder = typeBuilder.DefineField("pointer", typeof(IntPtr), FieldAttributes.Private);
+            FieldInfo pointerField = typeBuilder.DefineField("pointer", typeof(IntPtr), FieldAttributes.Private);
             List<ConstructorBuilder> constructorBuilders = new List<ConstructorBuilder>();
             MethodBuilder strMethodBuilder = null;
             MethodBuilder hashMethodBuilder = null;
@@ -63,7 +82,36 @@ namespace Python
 
                 switch (memberType.Name)
                 {
-                    // TODO: Properties
+                    // Properties
+                    case "property":
+                    {
+                        PythonObject pythonGetMethod = member.Value.GetAttribute("fget");
+                        PythonObject pythonSetMethod = member.Value.GetAttribute("fset");
+
+                        PropertyInfo clrProperty = baseType.GetProperty(member.Key);
+                        MethodInfo clrGetMethod = clrProperty?.GetGetMethod(true);
+                        MethodInfo clrSetMethod = clrProperty?.GetSetMethod(true);
+
+                        MethodBuilder getMethodBuilder = null, setMethodBuilder = null;
+                        Type propertyType = clrProperty?.PropertyType ?? typeof(object);
+
+                        if (pythonGetMethod != Py_None)
+                            getMethodBuilder = FromPythonHelper.AddMethodProxy(typeBuilder, "get_" + member.Key, pythonGetMethod.Pointer, pointerField, clrGetMethod, propertyType, Type.EmptyTypes, true);
+                        if (pythonSetMethod != Py_None)
+                            setMethodBuilder = FromPythonHelper.AddMethodProxy(typeBuilder, "set_" + member.Key, pythonSetMethod.Pointer, pointerField, clrSetMethod, typeof(void), new Type[] { propertyType }, true);
+
+                        if (clrProperty == null)
+                        {
+                            PropertyBuilder propertyBuilder = typeBuilder.DefineProperty(member.Key, PropertyAttributes.None, typeof(object), Type.EmptyTypes);
+
+                            if (getMethodBuilder != null)
+                                propertyBuilder.SetGetMethod(getMethodBuilder);
+                            if (setMethodBuilder != null)
+                                propertyBuilder.SetSetMethod(setMethodBuilder);
+                        }
+
+                        break;
+                    }
 
                     // Methods
                     case "instancemethod":
@@ -89,29 +137,10 @@ namespace Python
                                 if (method?.IsFinal == true)
                                     continue;
 
-                                MethodAttributes methodAttributes = method?.IsVirtual == true ? (MethodAttributes.Public | MethodAttributes.Virtual) : MethodAttributes.Public;
-                                MethodBuilder methodBuilder = typeBuilder.DefineMethod(member.Key, methodAttributes, method == null ? typeof(object) : method.ReturnType, method == null ? new Type[] { typeof(object[]) } : method.GetParameters().Select(p => p.ParameterType).ToArray());
-
-                                ILGenerator ilGenerator = methodBuilder.GetILGenerator();
-                                ilGenerator.Emit(OpCodes.Ldarg_0);
-
-                                ilGenerator.Emit(OpCodes.Ldfld, fieldBuilder); // instance
-
-                                if (IntPtr.Size == 4)
-                                    ilGenerator.Emit(OpCodes.Ldc_I4, member.Value.Pointer.ToInt32()); // method
-                                else if (IntPtr.Size == 8)
-                                    ilGenerator.Emit(OpCodes.Ldc_I8, member.Value.Pointer.ToInt64()); // method
-                                
-                                ilGenerator.Emit(OpCodes.Ldnull); // args
-                                ilGenerator.EmitCall(OpCodes.Call, methodProxy, Type.EmptyTypes); // CallProxy
-                        
-                                if (method != null && method.ReturnType == typeof(void))
-                                    ilGenerator.Emit(OpCodes.Pop);
-
-                                ilGenerator.Emit(OpCodes.Ret);
-
-                                if (method?.IsVirtual == true)
-                                    typeBuilder.DefineMethodOverride(methodBuilder, method);
+                                if (method == null)
+                                    FromPythonHelper.AddGenericMethodProxy(typeBuilder, member.Key, member.Value.Pointer, pointerField);
+                                else
+                                    FromPythonHelper.AddMethodProxy(typeBuilder, member.Key, member.Value.Pointer, pointerField, method, method.ReturnType, method.GetParameters().Select(p => p.ParameterType).ToArray());
 
                                 break;
                             }
@@ -129,7 +158,7 @@ namespace Python
 
                 ILGenerator ilGenerator = constructorBuilder.GetILGenerator();
                 ilGenerator.Emit(OpCodes.Ldarg_0);
-                ilGenerator.Emit(OpCodes.Ldarg_0); // instance
+                ilGenerator.Emit(OpCodes.Dup); // instance
 
                 if (IntPtr.Size == 4)
                     ilGenerator.Emit(OpCodes.Ldc_I4, pointer.ToInt32()); // type
@@ -138,7 +167,7 @@ namespace Python
 
                 ilGenerator.Emit(OpCodes.Ldnull); // null
                 ilGenerator.EmitCall(OpCodes.Call, constructorProxy, Type.EmptyTypes); // CallProxy
-                ilGenerator.Emit(OpCodes.Stfld, fieldBuilder);
+                ilGenerator.Emit(OpCodes.Stfld, pointerField);
 
                 ilGenerator.Emit(OpCodes.Ret);
             }
@@ -146,10 +175,12 @@ namespace Python
             // Build type and check for abstract methods
             Type type = typeBuilder.CreateType();
 
-            // Debug: Save assembly
-            //assemblyBuilder.Save(typeName + ".dll");
+#if DEBUG
+            assemblyBuilder.Save(typeName + ".dll");
+#endif
 
             // Register type and return it
+            FromPythonHelper.BuiltTypes.Add(type);
             ObjectManager.Register(type, pointer);
             return type;
         }
@@ -164,36 +195,124 @@ namespace Python
             return typeObject;
         }
 
-        public static IntPtr ConstructorProxy(object instance, IntPtr type, object[] args)
+        public static class FromPythonHelper
         {
-            int length = args?.Length ?? 0;
-            PythonTuple tuple = new PythonTuple(length);
+            public static List<Type> BuiltTypes { get; } = new List<Type>();
 
-            for (int i = 0; i < length; i++)
-                tuple[i] = PythonObject.From(args[i]);
+            public static MethodBuilder AddMethodProxy(TypeBuilder type, string name, IntPtr pythonMethod, FieldInfo pointerField, MethodInfo baseMethod = null, Type returnType = null, Type[] parameterTypes = null, bool hidden = false)
+            {
+                if (returnType == null)
+                    returnType = baseMethod == null ? typeof(object) : baseMethod.ReturnType;
+                if (parameterTypes == null)
+                    parameterTypes = baseMethod == null ? new Type[] { typeof(object[]) } : baseMethod.GetParameters().Select(p => p.ParameterType).ToArray();
 
-            PythonObject result;
-            using (PythonException.Checker)
-                result = PyObject_CallObject(type, tuple);
+                MethodAttributes methodAttributes = baseMethod?.IsVirtual == true ? (MethodAttributes.Public | MethodAttributes.Virtual) : MethodAttributes.Public;
+                if (hidden)
+                    methodAttributes |= MethodAttributes.HideBySig;
 
-            ObjectManager.Register(instance, result);
-            return result;
-        }
-        public static object MethodProxy(IntPtr instance, IntPtr method, object[] args)
-        {
-            int length = args?.Length ?? 0;
+                MethodBuilder methodBuilder = type.DefineMethod(name, methodAttributes, returnType, parameterTypes);
+                MethodInfo methodProxy = typeof(FromPythonHelper).GetMethod(nameof(MethodProxy));
 
-            PythonTuple parameters = new PythonTuple(length + 1);
-            parameters[0] = instance;
+                ILGenerator ilGenerator = methodBuilder.GetILGenerator();
+                ilGenerator.Emit(OpCodes.Ldarg_0);
 
-            for (int i = 0; i < length; i++)
-                parameters[i + 1] = PythonObject.From(args[i]);
+                ilGenerator.Emit(OpCodes.Ldfld, pointerField); // instance
 
-            PythonObject result;
-            using (PythonException.Checker)
-                result = PyObject_CallObject(method, parameters);
+                if (IntPtr.Size == 4)
+                    ilGenerator.Emit(OpCodes.Ldc_I4, pythonMethod.ToInt32()); // method
+                else if (IntPtr.Size == 8)
+                    ilGenerator.Emit(OpCodes.Ldc_I8, pythonMethod.ToInt64()); // method
 
-            return PythonObject.Convert(result);
+                if (parameterTypes.Length == 0)
+                    ilGenerator.Emit(OpCodes.Ldnull); // args
+                else
+                {
+                    ilGenerator.Emit(OpCodes.Ldc_I4, parameterTypes.Length);
+                    ilGenerator.Emit(OpCodes.Newarr, typeof(object));
+
+                    for (int i = 0; i < parameterTypes.Length; i++)
+                    {
+                        ilGenerator.Emit(OpCodes.Dup);
+                        ilGenerator.Emit(OpCodes.Ldc_I4, i);
+                        ilGenerator.Emit(OpCodes.Ldarg, i + 1);
+
+                        if (parameterTypes[i].IsValueType)
+                            ilGenerator.Emit(OpCodes.Box, parameterTypes[i]);
+
+                        ilGenerator.Emit(OpCodes.Stelem_Ref);
+                    }
+                }
+
+                ilGenerator.EmitCall(OpCodes.Call, methodProxy, null); // CallProxy
+
+                if (returnType == typeof(void))
+                    ilGenerator.Emit(OpCodes.Pop);
+                else if (returnType.IsValueType)
+                    ilGenerator.Emit(OpCodes.Unbox_Any, returnType);
+
+                ilGenerator.Emit(OpCodes.Ret);
+
+                if (baseMethod?.IsVirtual == true)
+                    type.DefineMethodOverride(methodBuilder, baseMethod);
+
+                return methodBuilder;
+            }
+            public static MethodBuilder AddGenericMethodProxy(TypeBuilder type, string name, IntPtr pythonMethod, FieldInfo pointerField)
+            {
+                Type methodReturnType = typeof(object);
+                Type[] methodParameterTypes = new[] { typeof(object[]) };
+                MethodAttributes methodAttributes = MethodAttributes.Public;
+                MethodBuilder methodBuilder = type.DefineMethod(name, methodAttributes, methodReturnType, methodParameterTypes);
+                MethodInfo methodProxy = typeof(FromPythonHelper).GetMethod(nameof(MethodProxy));
+
+                ILGenerator ilGenerator = methodBuilder.GetILGenerator();
+                ilGenerator.Emit(OpCodes.Ldarg_0);
+
+                ilGenerator.Emit(OpCodes.Ldfld, pointerField); // instance
+
+                if (IntPtr.Size == 4)
+                    ilGenerator.Emit(OpCodes.Ldc_I4, pythonMethod.ToInt32()); // method
+                else if (IntPtr.Size == 8)
+                    ilGenerator.Emit(OpCodes.Ldc_I8, pythonMethod.ToInt64()); // method
+
+                ilGenerator.Emit(OpCodes.Ldarg_1); // args
+                ilGenerator.EmitCall(OpCodes.Call, methodProxy, null); // CallProxy
+                ilGenerator.Emit(OpCodes.Ret);
+
+                return methodBuilder;
+            }
+
+            public static IntPtr ConstructorProxy(object instance, IntPtr type, object[] args)
+            {
+                int length = args?.Length ?? 0;
+                PythonTuple tuple = new PythonTuple(length);
+
+                for (int i = 0; i < length; i++)
+                    tuple[i] = PythonObject.From(args[i]);
+
+                PythonObject result;
+                using (PythonException.Checker)
+                    result = PyObject_CallObject(type, tuple);
+
+                ObjectManager.Register(instance, result);
+                return result;
+            }
+            public static object MethodProxy(IntPtr instance, IntPtr method, object[] args)
+            {
+                int length = args?.Length ?? 0;
+
+                PythonTuple parameters = new PythonTuple(length + 1);
+                parameters[0] = instance;
+
+                for (int i = 0; i < length; i++)
+                    parameters[i + 1] = PythonObject.From(args[i]);
+
+                PythonObject result;
+                using (PythonException.Checker)
+                    result = PyObject_CallObject(method, parameters);
+
+                return PythonObject.Convert(result);
+            }
         }
     }
 
@@ -213,18 +332,26 @@ namespace Python
             pointer = PyObject_CallObject(pointer, IntPtr.Zero);
         }
     }
-    public class MyClass2 : MyClass
+    public class MyClass2
     {
-        public override void Test2()
+        public void Test2(int a, bool b, string c)
         {
-            base.Test2();
+            var toto = new object[3] { a, b, c };
+        }
+        public object Test3()
+        {
+            return Test4();
+        }
+        public object Test4()
+        {
+            return true;
         }
     }
 
     public static class ObjectManager
     {
-        internal static Hashtable ClrToPython = new Hashtable();
-        internal static Hashtable PythonToClr = new Hashtable();
+        internal static Dictionary<object, IntPtr> ClrToPython = new Dictionary<object, IntPtr>();
+        internal static Dictionary<IntPtr, object> PythonToClr = new Dictionary<IntPtr, object>();
 
         public static void Register(object value, IntPtr pointer)
         {
@@ -274,21 +401,21 @@ namespace Python
 
             AddMethod("__init__", __init__);
             AddMethod("__str__", __str__);
-            AddMethod("__hash__", __hash__);
+            //AddMethod("__hash__", __hash__);
 
-            AddMethod("__call__", __call__);
-            AddMethod("__getattr__", __getattr__);
+            //AddMethod("__call__", __call__);
+            //AddMethod("__getattr__", __getattr__);
 
             if (type.GetInterfaces().Contains(typeof(IDisposable)))
             {
-                AddMethod("__enter__", __enter__);
-                AddMethod("__exit__", __exit__);
+                //AddMethod("__enter__", __enter__);
+                //AddMethod("__exit__", __exit__);
             }
 
             if (type.IsSubclassOf(typeof(IEnumerable)))
             {
-                AddMethod("__iter__", __iter__);
-                AddMethod("__reversed__", __reversed__);
+                //AddMethod("__iter__", __iter__);
+                //AddMethod("__reversed__", __reversed__);
             }
 
             List<MethodInfo> propertyMethods = new List<MethodInfo>();
@@ -303,35 +430,33 @@ namespace Python
                 if (setMethod != null)
                     propertyMethods.Add(setMethod);
 
-                AddProperty(property.Name, (a, b) => MethodProxy(getMethod, a, b), setMethod == null ? (TwoArgsPythonObjectFunction)null : (a, b) => MethodProxy(setMethod, a, b));
+                AddProperty(property.Name, (a, b) => MethodProxy(getMethod, a, b as PythonTuple), setMethod == null ? (TwoArgsPythonObjectFunction)null : (a, b) => MethodProxy(setMethod, a, b as PythonTuple));
             }
 
             // Add type methods
-            var methodGroups = type.GetMethods().Except(propertyMethods).GroupBy(m => m.Name);
+            var methodGroups = type.GetMethods()
+                                   .Except(propertyMethods)
+                                   .Where(m => m.Name != "GetHashCode")
+                                   .GroupBy(m => m.Name);
             foreach (var methodGroup in methodGroups)
-                AddMethod(methodGroup.Key, (a, b) => MethodProxy(methodGroup.ToArray(), a, b), PythonFunctionType.VarArgs);
+                AddMethod(methodGroup.Key, (a, b) => MethodProxy(methodGroup.ToArray(), a, b as PythonTuple));
         }
 
-        private PythonObject MethodProxy(MethodInfo method, PythonObject self, PythonObject args)
+        private PythonObject MethodProxy(MethodInfo method, PythonObject self, PythonTuple args)
         {
-            PythonTuple tuple = (PythonTuple)args;
-            PythonObject pythonObject = tuple[0];
-            object clrObject = ObjectManager.FromPython(pythonObject);
+            object clrObject = ObjectManager.FromPython(self);
 
-            object[] parameters = new object[tuple.Size - 1];
+            object[] parameters = new object[args.Size];
             for (int i = 0; i < parameters.Length; i++)
-                parameters[i] = Convert(tuple[i + 1]);
+                parameters[i] = Convert(args[i]);
 
             object clrResult = method.Invoke(clrObject, parameters);
             return From(clrResult);
         }
-        private PythonObject MethodProxy(MethodInfo[] methods, PythonObject self, PythonObject args)
+        private PythonObject MethodProxy(MethodInfo[] methods, PythonObject self, PythonTuple args)
         {
-            PythonTuple tuple = (PythonTuple)args;
-            PythonObject pythonObject = tuple[0];
-            object clrObject = ObjectManager.FromPython(pythonObject);
-
-            int argsCout = tuple.Size - 1;
+            object clrObject = ObjectManager.FromPython(self);
+            int argsCout = args.Size;
 
             foreach (MethodInfo method in methods)
             {
@@ -351,7 +476,7 @@ namespace Python
                     }
 
                     object parameter;
-                    if (!TryConvert(tuple[i + 1], parametersInfo[i].ParameterType, out parameter))
+                    if (!TryConvert(args[i], parametersInfo[i].ParameterType, out parameter))
                     {
                         match = false;
                         break;
@@ -372,9 +497,6 @@ namespace Python
 
         private PythonObject __init__(PythonObject self, PythonObject args)
         {
-            PythonTuple tuple = (PythonTuple)args;
-            PythonObject pythonInstance = tuple[0];
-
             object clrObject;
 
             if (ClrType.IsAbstract)
@@ -382,435 +504,140 @@ namespace Python
             else
                 clrObject = Activator.CreateInstance(ClrType);
 
-            ClrObject pythonObject = new ClrObject(pythonInstance, clrObject);
+            ClrObject pythonObject = new ClrObject(self, clrObject);
             ObjectManager.Register(clrObject, pythonObject.Pointer);
 
             return Py_None;
         }
 
-        private static PythonObject __del__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __cmp__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __eq__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __ne__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __lt__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __gt__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __le__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __ge__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __pos__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __neg__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __abs__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __invert__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __round__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __floor__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __ceil__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __trunc__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __add__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __sub__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __mul__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __floordiv__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __div__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __truediv__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __mod__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __divmod__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __pow__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __lshift__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __rshift__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __and__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __or__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __xor__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __radd__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __rsub__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __rmul__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __rfloordiv__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __rdiv__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __rtruediv__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __rmod__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __rdivmod__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __rpow__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __rlshift__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __rrshift__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __rand__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __ror__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __rxor__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __iadd__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __isub__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __imul__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __ifloordiv__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __idiv__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __itruediv__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __imod__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __idivmod__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __ipow__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __ilshift__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __irshift__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __iand__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __ior__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __ixor__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __int__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __long__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __float__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __complex__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __oct__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __hex__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __index__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __coerce__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
         private static PythonObject __str__(PythonObject self, PythonObject args)
         {
-            PythonObject me = args;
-
-            object value = ObjectManager.FromPython(me);
+            object value = ObjectManager.FromPython(self);
             if (value == null)
                 return Py_None;
 
             return (PythonString)value.ToString();
         }
-        private static PythonObject __repr__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __unicode__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __format__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
         private static PythonObject __hash__(PythonObject self, PythonObject args)
         {
-            PythonObject me = args;
-
-            object value = ObjectManager.FromPython(me);
+            object value = ObjectManager.FromPython(self);
             if (value == null)
                 return Py_None;
 
             return (PythonNumber)value.GetHashCode();
         }
-        private static PythonObject __nonzero__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __dir__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __sizeof__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __getattr__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __setattr__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __delattr__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __len__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __getitem__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __setitem__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __delitem__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __iter__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __reversed__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __contains__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __missing__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __instancecheck__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __subclasscheck__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __call__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __enter__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
         private static PythonObject __exit__(PythonObject self, PythonObject args)
         {
-            PythonObject me = args;
-
-            object value = ObjectManager.FromPython(me);
+            object value = ObjectManager.FromPython(self);
             if (value == null)
                 return Py_None;
 
             (value as IDisposable).Dispose();
             return Py_None;
         }
-        private static PythonObject __get__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __set__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __delete__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __copy__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __deepcopy__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __getinitargs__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __getnewargs__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __getstate__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __setstate__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __reduce__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
-        private static PythonObject __reduce_ex__(PythonObject self, PythonObject args)
-        {
-            return Py_None;
-        }
+
+        /*
+            Python system methods
+
+            __del__
+            __cmp__
+            __eq__
+            __ne__
+            __lt__
+            __gt__
+            __le__
+            __ge__
+            __pos__
+            __neg__
+            __abs__
+            __invert__
+            __round__
+            __floor__
+            __ceil__
+            __trunc__
+            __add__
+            __sub__
+            __mul__
+            __floordiv__
+            __div__
+            __truediv__
+            __mod__
+            __divmod__
+            __pow__
+            __lshift__
+            __rshift__
+            __and__
+            __or__
+            __xor__
+            __radd__
+            __rsub__
+            __rmul__
+            __rfloordiv__
+            __rdiv__
+            __rtruediv__
+            __rmod__
+            __rdivmod__
+            __rpow__
+            __rlshift__
+            __rrshift__
+            __rand__
+            __ror__
+            __rxor__
+            __iadd__
+            __isub__
+            __imul__
+            __ifloordiv__
+            __idiv__
+            __itruediv__
+            __imod__
+            __idivmod__
+            __ipow__
+            __ilshift__
+            __irshift__
+            __iand__
+            __ior__
+            __ixor__
+            __int__
+            __long__
+            __float__
+            __complex__
+            __oct__
+            __hex__
+            __index__
+            __coerce__
+            __repr__
+            __unicode__
+            __format__
+            __nonzero__
+            __dir__
+            __sizeof__
+            __getattr__
+            __setattr__
+            __delattr__
+            __len__
+            __getitem__
+            __setitem__
+            __delitem__
+            __iter__
+            __reversed__
+            __contains__
+            __missing__
+            __instancecheck__
+            __subclasscheck__
+            __call__
+            __enter__
+            __get__
+            __set__
+            __delete__
+            __copy__
+            __deepcopy__
+            __getinitargs__
+            __getnewargs__
+            __getstate__
+            __setstate__
+            __reduce__
+            __reduce_ex__
+        */
     }
 
     public class ClrObject : PythonObject
