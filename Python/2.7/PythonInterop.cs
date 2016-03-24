@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Reflection.Emit;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
 
@@ -17,6 +18,10 @@ namespace Python
 
     public static class TypeManager
     {
+#if DEBUG
+        public static bool DumpConvertedType { get; set; } = false;
+#endif
+
         public static Type FromPython(IntPtr pointer, Type baseType = null)
         {
             if (pointer == IntPtr.Zero)
@@ -55,11 +60,13 @@ namespace Python
             // Setup builders
             AssemblyName assemblyName = new AssemblyName(typeName + "_Assembly");
             AssemblyBuilder assemblyBuilder = AppDomain.CurrentDomain.DefineDynamicAssembly(assemblyName, AssemblyBuilderAccess.RunAndSave);
-            ModuleBuilder module = assemblyBuilder.DefineDynamicModule(typeName + "_Module"
+            ModuleBuilder module;
 #if DEBUG
-                , typeName + ".dll"
+            if (DumpConvertedType)
+                module = assemblyBuilder.DefineDynamicModule(typeName + "_Module", typeName + ".dll");
+            else
 #endif
-                );
+                module = assemblyBuilder.DefineDynamicModule(typeName + "_Module");
 
             // Find class specs
             if (baseType == null)
@@ -176,7 +183,8 @@ namespace Python
             Type type = typeBuilder.CreateType();
 
 #if DEBUG
-            assemblyBuilder.Save(typeName + ".dll");
+            if (DumpConvertedType)
+                assemblyBuilder.Save(typeName + ".dll");
 #endif
 
             // Register type and return it
@@ -378,19 +386,6 @@ namespace Python
         }
     }
 
-    public class NamespaceObject : PythonObject
-    {
-        internal static PythonClass Class { get; private set; }
-        static NamespaceObject()
-        {
-            Class = new PythonClass("NamespaceClass");
-        }
-
-        public NamespaceObject(object value)
-        {
-        }
-    }
-
     public class ClrTypeObject : PythonClass
     {
         public Type ClrType { get; private set; }
@@ -403,8 +398,7 @@ namespace Python
             AddMethod("__str__", __str__);
             //AddMethod("__hash__", __hash__);
 
-            //AddMethod("__call__", __call__);
-            //AddMethod("__getattr__", __getattr__);
+            AddMethod("__getattr__", __getattr__);
 
             if (type.GetInterfaces().Contains(typeof(IDisposable)))
             {
@@ -495,7 +489,7 @@ namespace Python
             throw new ArgumentException("Could not find any overload matching the specified arguments");
         }
 
-        private PythonObject __init__(PythonObject self, PythonObject args)
+        private PythonObject __init__(PythonObject self, PythonTuple args)
         {
             object clrObject;
 
@@ -510,7 +504,7 @@ namespace Python
             return Py_None;
         }
 
-        private static PythonObject __str__(PythonObject self, PythonObject args)
+        private static PythonObject __str__(PythonObject self, PythonTuple args)
         {
             object value = ObjectManager.FromPython(self);
             if (value == null)
@@ -518,7 +512,7 @@ namespace Python
 
             return (PythonString)value.ToString();
         }
-        private static PythonObject __hash__(PythonObject self, PythonObject args)
+        private static PythonObject __hash__(PythonObject self, PythonTuple args)
         {
             object value = ObjectManager.FromPython(self);
             if (value == null)
@@ -526,7 +520,7 @@ namespace Python
 
             return (PythonNumber)value.GetHashCode();
         }
-        private static PythonObject __exit__(PythonObject self, PythonObject args)
+        private static PythonObject __exit__(PythonObject self, PythonTuple args)
         {
             object value = ObjectManager.FromPython(self);
             if (value == null)
@@ -534,6 +528,32 @@ namespace Python
 
             (value as IDisposable).Dispose();
             return Py_None;
+        }
+        private static PythonObject __getattr__(PythonObject self, PythonTuple args)
+        {
+            object value = ObjectManager.FromPython(self);
+
+            string name = (args[0] as PythonString)?.Value;
+            if (name == null)
+                throw new Exception("AttributeError");
+
+            bool extension = CollectExtensionMethods(value.GetType(), name).Any();
+            if (extension)
+                return new PythonTuple(0); // TODO: return virtual method object
+            else
+                throw new Exception("AttributeError");
+        }
+
+        private static IEnumerable<MethodInfo> CollectExtensionMethods(Type type, string name)
+        {
+            // Start with type assembly
+            Assembly typeAssembly = type.Assembly;
+            IEnumerable<MethodInfo> typeAssemblyMethods = typeAssembly.GetTypes().Where(t => t.IsSealed && !t.IsGenericType && !t.IsNested)
+                                                                                 .SelectMany(t => t.GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic))
+                                                                                 .Where(m => m.IsDefined(typeof(ExtensionAttribute), false))
+                                                                                 .Where(m => m.GetParameters()[0].ParameterType == type);
+            foreach (MethodInfo methodInfo in typeAssemblyMethods)
+                yield return methodInfo;
         }
 
         /*

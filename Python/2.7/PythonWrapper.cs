@@ -42,21 +42,26 @@ namespace Python
             if (value == null)
                 return Py_None;
 
-            if (value is char) return new PythonString(new string((char)value, 1));
-            if (value is string) return new PythonString((string)value);
+            Type type = value.GetType();
 
-            if (value is bool) return new PythonBoolean((bool)value);
-            if (value is sbyte) return new PythonNumber((sbyte)value);
-            if (value is byte) return new PythonNumber((byte)value);
-            if (value is short) return new PythonNumber((short)value);
-            if (value is ushort) return new PythonNumber((ushort)value);
-            if (value is int) return new PythonNumber((int)value);
-            if (value is uint) return new PythonNumber((uint)value);
-            if (value is long) return new PythonNumber((long)value);
-            if (value is ulong) return new PythonNumber((long)(ulong)value);
+            if (type.IsEnum)
+                type = type.GetEnumUnderlyingType();
 
-            if (value is float) return PyFloat_FromDouble((float)value);
-            if (value is double) return PyFloat_FromDouble((double)value);
+            if (type == typeof(char)) return new PythonString(new string((char)value, 1));
+            if (type == typeof(string)) return new PythonString((string)value);
+
+            if (type == typeof(bool)) return new PythonBoolean((bool)value);
+            if (type == typeof(sbyte)) return new PythonNumber((sbyte)value);
+            if (type == typeof(byte)) return new PythonNumber((byte)value);
+            if (type == typeof(short)) return new PythonNumber((short)value);
+            if (type == typeof(ushort)) return new PythonNumber((ushort)value);
+            if (type == typeof(int)) return new PythonNumber((int)value);
+            if (type == typeof(uint)) return new PythonNumber((uint)value);
+            if (type == typeof(long)) return new PythonNumber((long)value);
+            if (type == typeof(ulong)) return new PythonNumber((long)(ulong)value);
+
+            if (type == typeof(float)) return PyFloat_FromDouble((float)value);
+            if (type == typeof(double)) return PyFloat_FromDouble((double)value);
 
             return null;
         }
@@ -338,8 +343,9 @@ namespace Python
         public static implicit operator PythonObject(IntPtr pointer)
         {
             if (pointer == IntPtr.Zero)
-                return new PythonObject(pointer);
+                return Py_None; // new PythonObject(pointer);
 
+            Py_IncRef(pointer);
             IntPtr type = PyObject_Type(pointer);
 
             if (type == PythonBoolean.Type) return new PythonBoolean(pointer);
@@ -386,7 +392,7 @@ namespace Python
     public delegate IntPtr TwoArgsPythonFunction(IntPtr a, IntPtr b);
 
     public delegate PythonObject OneArgPythonObjectFunction(PythonObject a);
-    public delegate PythonObject TwoArgsPythonObjectFunction(PythonObject a, PythonObject b);
+    public delegate PythonObject TwoArgsPythonObjectFunction(PythonObject a, PythonTuple b);
 
     public enum PythonFunctionType : int
     {
@@ -678,6 +684,7 @@ namespace Python
         {
             Pointer = PyTuple_New(size);
         }
+        public PythonTuple(IEnumerable<PythonObject> objects) : this(objects.ToArray()) { }
         public PythonTuple(params PythonObject[] objects)
         {
             Pointer = PyTuple_New(objects.Length);
@@ -686,7 +693,7 @@ namespace Python
                 this[i] = objects[i];
         }
     }
-    public class PythonDictionary : PythonSequence
+    public class PythonDictionary : PythonSequence, IDictionary<PythonObject, PythonObject>
     {
         public static PythonType Type
         {
@@ -702,6 +709,56 @@ namespace Python
             {
                 using (PythonException.Checker)
                     return PyDict_Size(Pointer);
+            }
+        }
+
+        public ICollection<PythonObject> Keys
+        {
+            get
+            {
+                using (PythonException.Checker)
+                {
+                    int size = PyDict_Size(Pointer);
+                    PythonObject keys = PyDict_Keys(Pointer);
+
+                    List<PythonObject> result = new List<PythonObject>(size);
+                    for (int i = 0; i < size; i++)
+                        result.Add(PySequence_GetItem(keys, i));
+
+                    return result; // TODO: Make keys editable
+                }
+            }
+        }
+        public ICollection<PythonObject> Values
+        {
+            get
+            {
+                using (PythonException.Checker)
+                {
+                    int size = PyDict_Size(Pointer);
+                    PythonObject values = PyDict_Values(Pointer);
+
+                    List<PythonObject> result = new List<PythonObject>(size);
+                    for (int i = 0; i < size; i++)
+                        result.Add(PySequence_GetItem(values, i));
+
+                    return result; // TODO: Make values editable
+                }
+            }
+        }
+        public int Count
+        {
+            get
+            {
+                using (PythonException.Checker)
+                    return PyDict_Size(Pointer);
+            }
+        }
+        public bool IsReadOnly
+        {
+            get
+            {
+                return false;
             }
         }
 
@@ -749,6 +806,60 @@ namespace Python
         public PythonDictionary()
         {
             Pointer = PyDict_New();
+        }
+
+        public bool ContainsKey(PythonObject key)
+        {
+            using (PythonException.Checker)
+                return PyDict_GetItem(Pointer, key) != Py_None;
+        }
+        public void Add(PythonObject key, PythonObject value)
+        {
+            using (PythonException.Checker)
+                PyDict_SetItem(Pointer, key, value);
+        }
+        public bool Remove(PythonObject key)
+        {
+            throw new NotImplementedException();
+        }
+        public bool TryGetValue(PythonObject key, out PythonObject value)
+        {
+            if (ContainsKey(key))
+            {
+                value = this[key];
+                return true;
+            }
+            else
+            {
+                value = Py_None;
+                return false;
+            }
+        }
+        public void Add(KeyValuePair<PythonObject, PythonObject> item)
+        {
+            using (PythonException.Checker)
+                PyDict_SetItem(Pointer, item.Key, item.Value);
+        }
+        public void Clear()
+        {
+            using (PythonException.Checker)
+                PyDict_Clear(Pointer);
+        }
+        public bool Contains(KeyValuePair<PythonObject, PythonObject> item)
+        {
+            throw new NotImplementedException();
+        }
+        public void CopyTo(KeyValuePair<PythonObject, PythonObject>[] array, int arrayIndex)
+        {
+            throw new NotImplementedException();
+        }
+        public bool Remove(KeyValuePair<PythonObject, PythonObject> item)
+        {
+            throw new NotImplementedException();
+        }
+        IEnumerator<KeyValuePair<PythonObject, PythonObject>> IEnumerable<KeyValuePair<PythonObject, PythonObject>>.GetEnumerator()
+        {
+            throw new NotImplementedException();
         }
     }
     public class PythonFunction : PythonObject
@@ -804,6 +915,18 @@ namespace Python
             }
         }
         public PythonFunction(string name, TwoArgsPythonFunction function, string documentation = null) : this(name, function, PythonFunctionType.VarArgs, documentation) { }
+
+        public PythonObject Invoke(params PythonObject[] parameters)
+        {
+            int parameterLength = parameters?.Length ?? 0;
+            PythonTuple args = new PythonTuple(parameterLength);
+
+            for (int i = 0; i < parameterLength; i++)
+                args[i] = parameters[i];
+
+            using (PythonException.Checker)
+                return PyObject_CallObject(Pointer, args);
+        }
     }
     public class PythonMethod : PythonObject
     {
@@ -816,9 +939,26 @@ namespace Python
         }
 
         internal PythonMethod(IntPtr pointer) : base(pointer) { }
+        public PythonMethod(PythonType type, PythonFunction function)
+        {
+            Pointer = PyMethod_New(function, IntPtr.Zero, type);
+        }
         public PythonMethod(PythonClass type, PythonFunction function)
         {
             Pointer = PyMethod_New(function, IntPtr.Zero, type);
+        }
+
+        public PythonObject Invoke(PythonObject instance, params PythonObject[] parameters)
+        {
+            int parameterLength = parameters?.Length ?? 0;
+            PythonTuple args = new PythonTuple(parameterLength + 1);
+
+            args[0] = instance;
+            for (int i = 0; i < parameterLength; i++)
+                args[i + 1] = parameters[i];
+
+            using (PythonException.Checker)
+                return PyObject_CallObject(Pointer, args);
         }
     }
     public class PythonType : PythonObject
@@ -839,8 +979,14 @@ namespace Python
                     return (string)(PythonString)PyObject_GetAttrString(Pointer, "__name__");
             }
         }
-
-        protected PythonDictionary dict;
+        public PythonDictionary Dictionary
+        {
+            get
+            {
+                using (PythonException.Checker)
+                    return (PythonDictionary)PyObject_GetAttrString(Pointer, "__dict__");
+            }
+        }
 
         internal PythonType(IntPtr pointer) : base(pointer) { }
         public PythonType(string name, params PythonType[] bases)
@@ -853,15 +999,61 @@ namespace Python
                 for (int i = 0; i < bases.Length; i++)
                     classBases[i] = bases[i];
 
-                dict = new PythonDictionary();
-
                 PythonTuple classArgs = new PythonTuple(3);
                 classArgs[0] = className;
                 classArgs[1] = classBases;
-                classArgs[2] = dict;
+                classArgs[2] = new PythonDictionary();
 
                 Pointer = PyObject_CallObject(PyType_Type, classArgs);
             }
+        }
+
+        public void AddMethod(string name, TwoArgsPythonObjectFunction function, string documentation = null)
+        {
+            using (PythonException.Checker)
+            {
+                PythonFunction pythonFunction = new PythonFunction(name, (a, b) => MethodProxy(a, b, function), PythonFunctionType.VarArgs, documentation);
+                PythonMethod pythonMethod = new PythonMethod(this, pythonFunction);
+
+                PyObject_SetAttrString(this, name, pythonMethod);
+            }
+        }
+        public void AddProperty(string name, TwoArgsPythonObjectFunction getter, TwoArgsPythonObjectFunction setter = null)
+        {
+            PythonMethod getMethod = new PythonMethod(this, new PythonFunction("get_" + name, (a, b) => MethodProxy(a, b, getter)));
+            PythonMethod setMethod = null;
+
+            if (setter != null)
+                setMethod = new PythonMethod(this, new PythonFunction("set_" + name, (a, b) => MethodProxy(a, b, setter)));
+
+            PythonTuple propertyArgs = new PythonTuple(setMethod == null ? 1 : 2);
+            propertyArgs[0] = getMethod;
+            if (setMethod != null)
+                propertyArgs[1] = setMethod;
+
+            using (PythonException.Checker)
+            {
+                PythonObject propertyPython = PyObject_CallObject(PyProperty_Type, propertyArgs);
+                PyObject_SetAttrString(Pointer, name, propertyPython);
+            }
+        }
+
+        public PythonObject Create()
+        {
+            using (PythonException.Checker)
+                return PyObject_CallObject(this, IntPtr.Zero);
+        }
+
+        private static IntPtr MethodProxy(IntPtr a, IntPtr b, TwoArgsPythonObjectFunction function)
+        {
+            IntPtr self, args;
+
+            using (PythonException.Checker)
+                self = PyTuple_GetItem(b, 0);
+            using (PythonException.Checker)
+                args = PyTuple_GetSlice(b, 1, PyTuple_Size(b));
+
+            return function(self, new PythonTuple(args));
         }
     }
     public class PythonClass : PythonObject
@@ -899,60 +1091,66 @@ namespace Python
             }
         }
 
-        private PythonDictionary dict;
-
         internal PythonClass(IntPtr pointer) : base(pointer) { }
         public PythonClass(string name)
         {
-            dict = new PythonDictionary();
-            Pointer = PyClass_New(IntPtr.Zero, dict, PyString_FromString(name));
+            Pointer = PyClass_New(IntPtr.Zero, new PythonDictionary(), PyString_FromString(name));
+        }
+        public PythonClass(string name, params PythonObject[] bases)
+        {
+            Pointer = PyClass_New(new PythonTuple(bases), new PythonDictionary(), PyString_FromString(name));
         }
 
         public void AddMethod(string name, TwoArgsPythonObjectFunction function, string documentation = null)
         {
             using (PythonException.Checker)
             {
-                PythonFunction pythonFunction = new PythonFunction(name, (a, b) => function(PyTuple_GetItem(b, 0), PyTuple_GetSlice(b, 1, PyTuple_Size(b))), PythonFunctionType.VarArgs, documentation);
+                PythonFunction pythonFunction = new PythonFunction(name, (a, b) => MethodProxy(a, b, function), PythonFunctionType.VarArgs, documentation);
                 PythonMethod pythonMethod = new PythonMethod(this, pythonFunction);
 
-                PyDict_SetItemString(dict, name, pythonMethod);
+                PyObject_SetAttrString(this, name, pythonMethod);
             }
         }
         public void AddProperty(string name, TwoArgsPythonObjectFunction getter, TwoArgsPythonObjectFunction setter = null)
         {
-            PythonMethod getMethod = new PythonMethod(this, new PythonFunction("get_" + name, (a, b) => getter(PyTuple_GetItem(b, 0), PyTuple_GetSlice(b, 1, PyTuple_Size(b)))));
+            PythonMethod getMethod = new PythonMethod(this, new PythonFunction("get_" + name, (a, b) => MethodProxy(a, b, getter)));
             PythonMethod setMethod = null;
 
             if (setter != null)
-                setMethod = new PythonMethod(this, new PythonFunction("set_" + name, (a, b) => setter(PyTuple_GetItem(b, 0), PyTuple_GetSlice(b, 1, PyTuple_Size(b)))));
-
-            PythonType propertyType = PythonModule.Builtin.GetAttribute("property") as PythonType;
+                setMethod = new PythonMethod(this, new PythonFunction("set_" + name, (a, b) => MethodProxy(a, b, setter)));
 
             PythonTuple propertyArgs = new PythonTuple(setMethod == null ? 1 : 2);
             propertyArgs[0] = getMethod;
             if (setMethod != null)
                 propertyArgs[1] = setMethod;
 
-            PythonObject propertyPython = PyObject_CallObject(propertyType, propertyArgs);
-
-            PyDict_SetItemString(dict, name, propertyPython);
+            using (PythonException.Checker)
+            {
+                PythonObject propertyPython = PyObject_CallObject(PyProperty_Type, propertyArgs);
+                PyObject_SetAttrString(this, name, propertyPython);
+            }
         }
 
-        public PythonObject Instantiate()
+        public PythonObject Create()
         {
             using (PythonException.Checker)
                 return PyObject_CallObject(this, IntPtr.Zero);
         }
+
+        private static IntPtr MethodProxy(IntPtr a, IntPtr b, TwoArgsPythonObjectFunction function)
+        {
+            IntPtr self, args;
+
+            using (PythonException.Checker)
+                self = PyTuple_GetItem(b, 0);
+            using (PythonException.Checker)
+                args = PyTuple_GetSlice(b, 1, PyTuple_Size(b));
+
+            return function(self, new PythonTuple(args));
+        }
     }
     public class PythonModule : PythonObject
     {
-        public static PythonType Type
-        {
-            get
-            {
-                return new PythonType(PyModule_Type);
-            }
-        }
         public static PythonModule Builtin
         {
             get
@@ -965,6 +1163,21 @@ namespace Python
             get
             {
                 return Import("__builtin__");
+            }
+        }
+        public static PythonModule Imp
+        {
+            get
+            {
+                return Import("imp");
+            }
+        }
+
+        public static PythonType Type
+        {
+            get
+            {
+                return new PythonType(PyModule_Type);
             }
         }
 
@@ -1009,8 +1222,7 @@ namespace Python
                 if (!fileInfo.Exists)
                     throw new FileNotFoundException("Could not find file " + path, path);
 
-                PythonModule impModule = (PythonModule)PyImport_ImportModule("imp");
-                PythonObject loadMethod = PyObject_GetAttrString(impModule, "load_source");
+                PythonObject loadMethod = Imp.GetAttribute("load_source");
 
                 PythonTuple args = new PythonTuple(2);
                 args[0] = (PythonString)Path.GetFileNameWithoutExtension(fileInfo.Name);
@@ -1025,6 +1237,15 @@ namespace Python
         {
             using (PythonException.Checker)
                 return (PythonModule)PyImport_ImportModule(name);
+        }
+
+        public void AddFunction(string name, OneArgPythonObjectFunction function, string documentation = null)
+        {
+            using (PythonException.Checker)
+            {
+                PythonFunction pythonFunction = new PythonFunction(name, (a, b) => function(b), PythonFunctionType.VarArgs, documentation);
+                Dictionary[name] = pythonFunction;
+            }
         }
     }
 

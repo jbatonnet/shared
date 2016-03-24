@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Text;
 
@@ -7,17 +8,19 @@ namespace Python
 {
     public static class Python
     {
-        [DllImport("kernel32.dll")]
+        [DllImport("kernel32.dll", SetLastError = true)]
         private static extern IntPtr LoadLibrary(string filename);
-        [DllImport("kernel32.dll")]
+        [DllImport("kernel32.dll", SetLastError = true)]
         private static extern IntPtr GetModuleHandle(string lpModuleName);
-        [DllImport("kernel32.dll")]
+        [DllImport("kernel32.dll", SetLastError = true)]
         private static extern IntPtr GetProcAddress(IntPtr hModule, string procName);
 
         [DllImport("libdl.so")]
         private static extern IntPtr dlopen(string filename, int flags);
         [DllImport("libdl.so")]
         private static extern IntPtr dlsym(IntPtr handle, string symbol);
+        [DllImport("libdl.so")]
+        private static extern string dlerror();
 
         private const string library = "python27.dll";
 
@@ -33,18 +36,33 @@ namespace Python
             if (module == IntPtr.Zero)
             {
                 if (Environment.OSVersion.Platform == PlatformID.Win32NT)
+                {
                     module = LoadLibrary("python27.dll");
+                    if (module == IntPtr.Zero)
+                        throw new Win32Exception(Marshal.GetLastWin32Error());
+                }
                 else if (Environment.OSVersion.Platform == PlatformID.Unix)
+                {
                     module = dlopen("libpython2.7.so", 2); // RTLD_NOW
-
-                if (module == IntPtr.Zero)
-                    throw new Exception("Could not load Python library");
+                    if (module == IntPtr.Zero)
+                        throw new Exception(dlerror());
+                }
+                else
+                    throw new PlatformNotSupportedException("Unable to load Python library on this platform");
             }
 
             if (Environment.OSVersion.Platform == PlatformID.Win32NT)
+            {
                 address = GetProcAddress(module, symbol);
+                if (address == IntPtr.Zero)
+                    throw new Win32Exception(Marshal.GetLastWin32Error());
+            }
             else if (Environment.OSVersion.Platform == PlatformID.Unix)
+            {
                 address = dlsym(module, symbol);
+                if (address == IntPtr.Zero)
+                    throw new Exception(dlerror());
+            }
 
             addresses.Add(symbol, address);
             return address;
@@ -154,6 +172,13 @@ namespace Python
                 return GetAddress("PyClass_Type");
             }
         }
+        public static IntPtr PyInstance_Type
+        {
+            get
+            {
+                return GetAddress("PyInstance_Type");
+            }
+        }
         public static IntPtr PyModule_Type
         {
             get
@@ -168,6 +193,54 @@ namespace Python
                 return GetAddress("PyString_Type");
             }
         }
+        public static IntPtr PyProperty_Type
+        {
+            get
+            {
+                return GetAddress("PyProperty_Type");
+            }
+        }
+        public static IntPtr PyRange_Type
+        {
+            get
+            {
+                return GetAddress("PyRange_Type");
+            }
+        }
+        public static IntPtr PyReversed_Type
+        {
+            get
+            {
+                return GetAddress("PyReversed_Type");
+            }
+        }
+        public static IntPtr PySet_Type
+        {
+            get
+            {
+                return GetAddress("PySet_Type");
+            }
+        }
+        public static IntPtr PyStaticMethod_Type
+        {
+            get
+            {
+                return GetAddress("PyStaticMethod_Type");
+            }
+        }
+        public static IntPtr PyFrame_Type
+        {
+            get
+            {
+                return GetAddress("PyFrame_Type");
+            }
+        }
+
+        [DllImport(library, CallingConvention = CallingConvention.Cdecl)]
+        public static extern void Py_IncRef(IntPtr pointer);
+
+        [DllImport(library, CallingConvention = CallingConvention.Cdecl)]
+        public static extern void Py_DecRef(IntPtr pointer);
 
         #region General
 
@@ -613,6 +686,9 @@ namespace Python
         #region Modules
 
         [DllImport(library, CallingConvention = CallingConvention.Cdecl)]
+        public static extern IntPtr Py_InitModule(string name, IntPtr methods);
+
+        [DllImport(library, CallingConvention = CallingConvention.Cdecl)]
         public static extern int PyModule_Check(IntPtr pointer);
 
         [DllImport(library, CallingConvention = CallingConvention.Cdecl)]
@@ -790,6 +866,9 @@ namespace Python
 
         [DllImport(library, CallingConvention = CallingConvention.Cdecl)]
         public static extern IntPtr PyFrame_New(IntPtr tstate, IntPtr code, IntPtr globals, IntPtr unknown);
+
+        [DllImport(library, CallingConvention = CallingConvention.Cdecl)]
+        public static extern void _Py_Dealloc(IntPtr pointer);
 
 
 
