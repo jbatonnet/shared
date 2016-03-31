@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Reflection;
 using System.Reflection.Emit;
@@ -12,10 +13,6 @@ using static Python.Python;
 
 namespace Python
 {
-    public static class AssemblyManager
-    {
-    }
-
     public static class TypeManager
     {
 #if DEBUG
@@ -197,7 +194,7 @@ namespace Python
             if (ObjectManager.ClrToPython.ContainsKey(type))
                 return (PythonClass)ObjectManager.ClrToPython[type];
 
-            ClrTypeObject typeObject = new ClrTypeObject(type);
+            ClrType typeObject = new ClrType(type);
             ObjectManager.Register(type, typeObject.Pointer);
 
             return typeObject;
@@ -290,6 +287,7 @@ namespace Python
                 return methodBuilder;
             }
 
+            [DebuggerHidden]
             public static IntPtr ConstructorProxy(object instance, IntPtr type, object[] args)
             {
                 int length = args?.Length ?? 0;
@@ -305,6 +303,7 @@ namespace Python
                 ObjectManager.Register(instance, result);
                 return result;
             }
+            //[DebuggerHidden]
             public static object MethodProxy(IntPtr instance, IntPtr method, object[] args)
             {
                 int length = args?.Length ?? 0;
@@ -319,43 +318,11 @@ namespace Python
                 using (PythonException.Checker)
                     result = PyObject_CallObject(method, parameters);
 
-                return PythonObject.Convert(result);
+                return ObjectManager.FromPython(result); // TODO: Send a type hint ?
             }
         }
     }
-
-    public class MyClass
-    { 
-        private IntPtr pointer;
-
-        public object Test(params object[] args)
-        {
-            return PyObject_CallObject(pointer, PyTuple_New(0));
-        }
-        public virtual void Test2()
-        {
-        }
-        public void Test3(object[] args)
-        {
-            pointer = PyObject_CallObject(pointer, IntPtr.Zero);
-        }
-    }
-    public class MyClass2
-    {
-        public void Test2(int a, bool b, string c)
-        {
-            var toto = new object[3] { a, b, c };
-        }
-        public object Test3()
-        {
-            return Test4();
-        }
-        public object Test4()
-        {
-            return true;
-        }
-    }
-
+    
     public static class ObjectManager
     {
         internal static Dictionary<object, IntPtr> ClrToPython = new Dictionary<object, IntPtr>();
@@ -372,27 +339,111 @@ namespace Python
 
         public static object FromPython(IntPtr pointer)
         {
+            if (pointer == IntPtr.Zero)
+                return null; // FIXME: Throw exception ?
+            if (pointer == Py_None)
+                return null;
+
+            object result = PythonObject.Convert(pointer);
+            if (result != null)
+                return result;
+
             if (PythonToClr.ContainsKey(pointer))
                 return PythonToClr[pointer];
+
+            // TODO: Build a .NET wrapper
+            // Return the wrapper
 
             return null;
         }
         public static IntPtr ToPython(object value)
         {
+            if (value == null)
+                return Py_None;
+
+            PythonObject result = PythonObject.From(value);
+            if (result != null)
+                return result;
+
             if (ClrToPython.ContainsKey(value))
                 return (PythonObject)ClrToPython[value];
 
-            return IntPtr.Zero;
+            Type type = value.GetType();
+            PythonClass pythonType = TypeManager.ToPython(type);
+
+            result = pythonType.CreateEmpty();
+            Register(value, result);
+
+            return result;
         }
     }
 
-    public class ClrTypeObject : PythonClass
+    public class ClrNamespace : PythonObject
     {
-        public Type ClrType { get; private set; }
+        public static PythonClass Type { get; private set; }
 
-        public ClrTypeObject(Type type) : base(type.FullName)
+        private static Dictionary<string, ClrNamespace> namespaces = new Dictionary<string, ClrNamespace>();
+        private static Dictionary<IntPtr, ClrNamespace> instances = new Dictionary<IntPtr, ClrNamespace>();
+
+        public ClrNamespace Parent { get; private set; }
+        public string Name { get; private set; }
+
+        static ClrNamespace()
         {
-            ClrType = type;
+            Type = new PythonClass("namespace");
+            Type.AddMethod("__getattr__", __getattr__);
+            Type.AddMethod("__str__", __str__);
+        }
+        public ClrNamespace(string name, ClrNamespace parent = null)
+        {
+            Pointer = Type.Create();
+            instances.Add(Pointer, this);
+
+            Parent = parent;
+            Name = name;
+        }
+
+        private static PythonObject __getattr__(PythonObject self, PythonTuple args)
+        {
+            ClrNamespace me = instances[self];
+
+            string name = (args[0] as PythonString).ToString();
+            string fullName = me.ToIdentifier() + "." + name;
+
+            Type type = AppDomain.CurrentDomain.GetAssemblies()
+                                               .Select(a => a.GetType(fullName))
+                                               .FirstOrDefault(t => t != null);
+
+            if (type == null)
+                return new ClrNamespace(name, me);
+            else
+                return TypeManager.ToPython(type);
+        }
+        private static PythonObject __str__(PythonObject self, PythonTuple args)
+        {
+            ClrNamespace me = instances[self];
+            return me.ToString();
+        }
+
+        public string ToIdentifier()
+        {
+            if (Parent == null)
+                return Name;
+            else
+                return Parent.ToIdentifier() + "." + Name;
+        }
+        public override string ToString()
+        {
+            return "namespace " + ToIdentifier();
+        }
+    }
+    public class ClrType : PythonClass
+    {
+        public Type Type { get; private set; }
+
+        public ClrType(Type type) : base(type.FullName)
+        {
+            Type = type;
 
             AddMethod("__init__", __init__);
             AddMethod("__str__", __str__);
@@ -414,8 +465,8 @@ namespace Python
 
             List<MethodInfo> propertyMethods = new List<MethodInfo>();
 
-            // Add type properties
-            foreach (PropertyInfo property in type.GetProperties())
+            // Add properties
+            foreach (PropertyInfo property in type.GetProperties(BindingFlags.Public | BindingFlags.Instance))
             {
                 MethodInfo getMethod = property.GetGetMethod(true);
                 MethodInfo setMethod = property.GetSetMethod(true);
@@ -424,38 +475,68 @@ namespace Python
                 if (setMethod != null)
                     propertyMethods.Add(setMethod);
 
-                AddProperty(property.Name, (a, b) => MethodProxy(getMethod, a, b as PythonTuple), setMethod == null ? (TwoArgsPythonObjectFunction)null : (a, b) => MethodProxy(setMethod, a, b as PythonTuple));
+                AddProperty(property.Name, (a, b) => MethodProxy(getMethod, a, b), setMethod == null ? (TwoArgsPythonObjectFunction)null : (a, b) => MethodProxy(setMethod, a, b));
             }
 
-            // Add type methods
+            // Add static properties
+            foreach (PropertyInfo property in type.GetProperties(BindingFlags.Public | BindingFlags.Static))
+            {
+                MethodInfo getMethod = property.GetGetMethod(true);
+                MethodInfo setMethod = property.GetSetMethod(true);
+
+                propertyMethods.Add(getMethod);
+                if (setMethod != null)
+                    propertyMethods.Add(setMethod);
+
+                AddStaticProperty(property.Name, a => MethodProxy(getMethod, null, a), setMethod == null ? (OneArgPythonObjectFunction)null : a => MethodProxy(setMethod, null, a));
+            }
+
+            // Add methods
             var methodGroups = type.GetMethods()
                                    .Except(propertyMethods)
                                    .Where(m => m.Name != "GetHashCode")
                                    .GroupBy(m => m.Name);
             foreach (var methodGroup in methodGroups)
                 AddMethod(methodGroup.Key, (a, b) => MethodProxy(methodGroup.ToArray(), a, b as PythonTuple));
+
+            // Add enum values
+            if (type.IsEnum)
+            {
+                foreach (string name in type.GetEnumNames())
+                    SetAttribute(name, From(Enum.Parse(type, name)));
+            }
         }
 
-        private PythonObject MethodProxy(MethodInfo method, PythonObject self, PythonTuple args)
+        private static PythonObject MethodProxy(MethodInfo method, PythonObject self, PythonTuple args)
         {
-            object clrObject = ObjectManager.FromPython(self);
+            object clrObject = self == null ? null : ObjectManager.FromPython(self);
 
             object[] parameters = new object[args.Size];
             for (int i = 0; i < parameters.Length; i++)
                 parameters[i] = Convert(args[i]);
 
             object clrResult = method.Invoke(clrObject, parameters);
-            return From(clrResult);
+            return ObjectManager.ToPython(clrResult);
         }
-        private PythonObject MethodProxy(MethodInfo[] methods, PythonObject self, PythonTuple args)
+        private static PythonObject MethodProxy(MethodInfo[] methods, PythonObject self, PythonTuple args)
         {
-            object clrObject = ObjectManager.FromPython(self);
-            int argsCout = args.Size;
+            object clrObject = self == null ? null : ObjectManager.FromPython(self);
 
-            foreach (MethodInfo method in methods)
+            object result;
+            if (!TryCallMethod(methods, clrObject, args, out result))
+                throw new ArgumentException("Could not find any overload matching the specified arguments");
+
+            return ObjectManager.ToPython(result);
+        }
+
+        private static bool TryCallMethod(IEnumerable<MethodBase> methods, object instance, PythonTuple args, out object result)
+        {
+            PythonObject[] pythonParameters = (args as IEnumerable<PythonObject>).ToArray();
+
+            foreach (MethodBase method in methods)
             {
                 ParameterInfo[] parametersInfo = method.GetParameters();
-                if (argsCout > parametersInfo.Length)
+                if (pythonParameters.Length > parametersInfo.Length)
                     continue;
 
                 bool match = true;
@@ -463,14 +544,22 @@ namespace Python
 
                 for (int i = 0; i < parameters.Length; i++)
                 {
-                    if (i >= argsCout && parametersInfo[i].IsOptional)
+                    if (i >= pythonParameters.Length)
                     {
-                        parameters[i] = parametersInfo[i].DefaultValue;
-                        continue;
+                        if (parametersInfo[i].IsOptional)
+                        {
+                            parameters[i] = parametersInfo[i].DefaultValue;
+                            continue;
+                        }
+                        else
+                        {
+                            match = false;
+                            break;
+                        }
                     }
 
                     object parameter;
-                    if (!TryConvert(args[i], parametersInfo[i].ParameterType, out parameter))
+                    if (!TryConvert(pythonParameters[i], parametersInfo[i].ParameterType, out parameter))
                     {
                         match = false;
                         break;
@@ -482,28 +571,40 @@ namespace Python
                 if (!match)
                     continue;
 
-                object result = method.Invoke(clrObject, parameters);
-                return From(result);
+                if (method is ConstructorInfo)
+                    result = (method as ConstructorInfo).Invoke(parameters);
+                else
+                    result = method.Invoke(instance, parameters);
+
+                return true;
             }
 
-            throw new ArgumentException("Could not find any overload matching the specified arguments");
+            result = null;
+            return false;
         }
 
-        private PythonObject __init__(PythonObject self, PythonTuple args)
+        private PythonObject __init__(PythonObject self, PythonTuple args, PythonDictionary kw)
         {
             object clrObject;
 
-            if (ClrType.IsAbstract)
+            if (kw.Pointer != IntPtr.Zero)
+                return Py_None;
+
+            if (Type.IsAbstract)
                 clrObject = new object();
             else
-                clrObject = Activator.CreateInstance(ClrType);
+            {
+                ConstructorInfo[] constructors = Type.GetConstructors(BindingFlags.Public | BindingFlags.Instance);
+
+                if (!TryCallMethod(constructors, null, args, out clrObject))
+                    throw new ArgumentException("Could not find any overload matching the specified arguments");
+            }
 
             ClrObject pythonObject = new ClrObject(self, clrObject);
             ObjectManager.Register(clrObject, pythonObject.Pointer);
 
             return Py_None;
         }
-
         private static PythonObject __str__(PythonObject self, PythonTuple args)
         {
             object value = ObjectManager.FromPython(self);
@@ -532,10 +633,22 @@ namespace Python
         private static PythonObject __getattr__(PythonObject self, PythonTuple args)
         {
             object value = ObjectManager.FromPython(self);
+            if (value == null)
+                return Py_None;
 
             string name = (args[0] as PythonString)?.Value;
             if (name == null)
                 throw new Exception("AttributeError");
+
+            // TODO: Ugly hack to handle .NET PythonObject classes
+            // Handle this case in TypeManager.ToPython ...
+            if (value is PythonObject)
+            {
+                IntPtr pointer = (value as PythonObject).Pointer;
+
+                if (PyObject_HasAttrString(pointer, name) != 0)
+                    return (value as PythonObject).GetAttribute(name);
+            }
 
             bool extension = CollectExtensionMethods(value.GetType(), name).Any();
             if (extension)
@@ -659,7 +772,6 @@ namespace Python
             __reduce_ex__
         */
     }
-
     public class ClrObject : PythonObject
     {
         public object Object { get; private set; }

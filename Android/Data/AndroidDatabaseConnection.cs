@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Data;
 using System.Data.Common;
+using System.Diagnostics;
 using System.Linq;
 
 using Android.Content;
@@ -318,11 +319,13 @@ namespace Android.Utilities
             if (cancellationSignal != null)
                 cancellationSignal.Cancel();
         }
+        [DebuggerHidden]
         public override int ExecuteNonQuery()
         {
             database.ExecSQL(query);
-            return 0;
+            return 0; // TODO: Return count of affected rows
         }
+        [DebuggerHidden]
         public override object ExecuteScalar()
         {
             cancellationSignal = new CancellationSignal();
@@ -347,6 +350,7 @@ namespace Android.Utilities
         {
             throw new NotImplementedException();
         }
+        [DebuggerHidden]
         protected override DbDataReader ExecuteDbDataReader(CommandBehavior behavior)
         {
             cancellationSignal = new CancellationSignal();

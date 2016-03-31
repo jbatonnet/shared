@@ -77,8 +77,8 @@ namespace Python
             if (type == PythonNumber.IntType) return PyInt_AsLong(pointer);
             if (type == PythonNumber.LongType) return PyLong_AsLongLong(pointer);
 
-            if (PySequence_Check(pointer))
-                return Enumerate(pointer);
+            //if (PySequence_Check(pointer))
+            //    return Enumerate(pointer);
 
             return (PythonObject)pointer;
         }
@@ -327,12 +327,14 @@ namespace Python
             using (PythonException.Checker)
             {
                 IntPtr pythonString = PyObject_Str(Pointer);
-                IntPtr cString = PyString_AsString(pythonString);
+                if (pythonString == IntPtr.Zero)
+                    return null;
 
+                IntPtr cString = PyString_AsString(pythonString);
                 if (cString == IntPtr.Zero)
                     return null;
-                else
-                    return Marshal.PtrToStringAnsi(cString);
+             
+                return Marshal.PtrToStringAnsi(cString);
             }
         }
         public bool Equals(PythonObject other)
@@ -390,17 +392,21 @@ namespace Python
     public delegate IntPtr OneArgPythonFunction(IntPtr a);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     public delegate IntPtr TwoArgsPythonFunction(IntPtr a, IntPtr b);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    public delegate IntPtr ThreeArgsPythonFunction(IntPtr a, IntPtr b, IntPtr c);
 
-    public delegate PythonObject OneArgPythonObjectFunction(PythonObject a);
-    public delegate PythonObject TwoArgsPythonObjectFunction(PythonObject a, PythonTuple b);
+    public delegate PythonObject OneArgPythonObjectFunction(PythonTuple args);
+    public delegate PythonObject TwoArgsPythonObjectFunction(PythonObject self, PythonTuple args);
+    public delegate PythonObject ThreeArgsPythonObjectFunction(PythonObject self, PythonTuple args, PythonDictionary kw);
 
     public enum PythonFunctionType : int
     {
-        VarArgs = 0x01,
-        NoArgs = 0x04,
-        OneArg = 0x08,
-        Class = 0x10,
-        Static = 0x20,
+        VarArgs =  0x01,
+        Keywords = 0x02,
+        NoArgs =   0x04,
+        OneArg =   0x08,
+        Class =    0x10,
+        Static =   0x20,
     }
     public abstract class PythonSequence : PythonObject, IEnumerable<PythonObject>
     {
@@ -662,12 +668,12 @@ namespace Python
             get
             {
                 using (PythonException.Checker)
-                    return PyTuple_GetItem(this, index);
+                    return PyTuple_GetItem(Pointer, index);
             }
             set
             {
                 using (PythonException.Checker)
-                    PyTuple_SetItem(this, index, value);
+                    PyTuple_SetItem(Pointer, index, value);
             }
         }
         public override PythonObject this[int from, int to]
@@ -675,7 +681,7 @@ namespace Python
             get
             {
                 using (PythonException.Checker)
-                    return PyTuple_GetSlice(this, from, to);
+                    return PyTuple_GetSlice(Pointer, from, to);
             }
         }
 
@@ -915,6 +921,26 @@ namespace Python
             }
         }
         public PythonFunction(string name, TwoArgsPythonFunction function, string documentation = null) : this(name, function, PythonFunctionType.VarArgs, documentation) { }
+        public PythonFunction(string name, ThreeArgsPythonFunction function, PythonFunctionType type, string documentation = null)
+        {
+            using (PythonException.Checker)
+            {
+                functionHandle = GCHandle.Alloc(function);
+
+                PyMethodDef methodDef = new PyMethodDef()
+                {
+                    ml_name = name,
+                    ml_meth = Marshal.GetFunctionPointerForDelegate(function),
+                    ml_flags = (int)(type | PythonFunctionType.Keywords),
+                    ml_doc = documentation
+                };
+
+                IntPtr methodPointer = PyMem_Malloc(Marshal.SizeOf(typeof(PyMethodDef)));
+                Marshal.StructureToPtr(methodDef, methodPointer, false);
+                Pointer = PyCFunction_New(methodPointer, IntPtr.Zero);
+            }
+        }
+        public PythonFunction(string name, ThreeArgsPythonFunction function, string documentation = null) : this(name, function, PythonFunctionType.VarArgs, documentation) { }
 
         public PythonObject Invoke(params PythonObject[] parameters)
         {
@@ -935,6 +961,13 @@ namespace Python
             get
             {
                 return new PythonType(PyMethod_Type);
+            }
+        }
+        public static PythonType StaticType
+        {
+            get
+            {
+                return new PythonType(PyStaticMethod_Type);
             }
         }
 
@@ -1111,6 +1144,31 @@ namespace Python
                 PyObject_SetAttrString(this, name, pythonMethod);
             }
         }
+        public void AddMethod(string name, ThreeArgsPythonObjectFunction function, string documentation = null)
+        {
+            using (PythonException.Checker)
+            {
+                PythonFunction pythonFunction = new PythonFunction(name, (a, b, c) => MethodProxy(a, b, c, function), PythonFunctionType.VarArgs, documentation);
+                PythonMethod pythonMethod = new PythonMethod(this, pythonFunction);
+
+                PyObject_SetAttrString(this, name, pythonMethod);
+            }
+        }
+        public void AddStaticMethod(string name, OneArgPythonObjectFunction function, string documentation = null)
+        {
+            using (PythonException.Checker)
+            {
+                PythonFunction pythonFunction = new PythonFunction(name, (a, b) => StaticMethodProxy(a, b, function), PythonFunctionType.VarArgs, documentation);
+                PythonMethod pythonMethod = new PythonMethod(this, pythonFunction);
+
+                PythonTuple staticMethodArgs = new PythonTuple(1);
+                staticMethodArgs[0] = pythonMethod;
+
+                PythonObject pythonStaticMethod = PyObject_CallObject(PythonMethod.StaticType, staticMethodArgs);
+
+                PyObject_SetAttrString(this, name, pythonStaticMethod);
+            }
+        }
         public void AddProperty(string name, TwoArgsPythonObjectFunction getter, TwoArgsPythonObjectFunction setter = null)
         {
             PythonMethod getMethod = new PythonMethod(this, new PythonFunction("get_" + name, (a, b) => MethodProxy(a, b, getter)));
@@ -1130,11 +1188,39 @@ namespace Python
                 PyObject_SetAttrString(this, name, propertyPython);
             }
         }
+        public void AddStaticProperty(string name, OneArgPythonObjectFunction getter, OneArgPythonObjectFunction setter = null)
+        {
+            PythonMethod getMethod = new PythonMethod(this, new PythonFunction("get_" + name, (a, b) => StaticMethodProxy(a, b, getter)));
+
+            PythonType classMethodType = PythonModule.Builtin.GetAttribute("classmethod") as PythonType;
+
+            PythonClass staticPropertyClass = new PythonClass("staticproperty", PyProperty_Type);
+            staticPropertyClass.AddMethod("__get__", (a, b) => getter(new PythonTuple()));
+            /*{
+                var fget = a.GetAttribute("fget");
+                var tmp = (PythonObject)PyObject_CallObject(classMethodType, new PythonTuple(fget));
+                var get = tmp.GetAttribute("__get__");
+
+                tmp = PyObject_CallObject(get, new PythonTuple(Py_None, b[1]));
+                var result = PyObject_CallObject(tmp, Py_None);
+                return result;
+            });*/
+
+            PythonObject propertyPython = PyObject_CallObject(staticPropertyClass, new PythonTuple((PythonObject)getMethod));
+            PyObject_SetAttrString(this, name, propertyPython);
+        }
 
         public PythonObject Create()
         {
             using (PythonException.Checker)
                 return PyObject_CallObject(this, IntPtr.Zero);
+        }
+        public PythonObject CreateEmpty()
+        {
+            // TODO: Need to create a python object without creating a .NET one
+
+            using (PythonException.Checker)
+                return PyObject_Call(this, IntPtr.Zero, new PythonDictionary());
         }
 
         private static IntPtr MethodProxy(IntPtr a, IntPtr b, TwoArgsPythonObjectFunction function)
@@ -1147,6 +1233,21 @@ namespace Python
                 args = PyTuple_GetSlice(b, 1, PyTuple_Size(b));
 
             return function(self, new PythonTuple(args));
+        }
+        private static IntPtr MethodProxy(IntPtr a, IntPtr b, IntPtr c, ThreeArgsPythonObjectFunction function)
+        {
+            IntPtr self, args;
+
+            using (PythonException.Checker)
+                self = PyTuple_GetItem(b, 0);
+            using (PythonException.Checker)
+                args = PyTuple_GetSlice(b, 1, PyTuple_Size(b));
+
+            return function(self, new PythonTuple(args), new PythonDictionary(c));
+        }
+        private static IntPtr StaticMethodProxy(IntPtr a, IntPtr b, OneArgPythonObjectFunction function)
+        {
+            return function((PythonTuple)b);
         }
     }
     public class PythonModule : PythonObject
@@ -1236,14 +1337,14 @@ namespace Python
         public static PythonModule Import(string name)
         {
             using (PythonException.Checker)
-                return (PythonModule)PyImport_ImportModule(name);
+                return (PythonObject)PyImport_ImportModule(name) as PythonModule;
         }
 
         public void AddFunction(string name, OneArgPythonObjectFunction function, string documentation = null)
         {
             using (PythonException.Checker)
             {
-                PythonFunction pythonFunction = new PythonFunction(name, (a, b) => function(b), PythonFunctionType.VarArgs, documentation);
+                PythonFunction pythonFunction = new PythonFunction(name, (a, b) => function((PythonTuple)b), PythonFunctionType.VarArgs, documentation);
                 Dictionary[name] = pythonFunction;
             }
         }
@@ -1251,6 +1352,33 @@ namespace Python
 
     public class PythonException : Exception
     {
+        public class PythonStackFrame : StackFrame
+        {
+            public string Function { get; }
+            public string File { get; }
+            public int Line { get; }
+
+            public PythonStackFrame(string function, string file, int line)
+            {
+                Function = function;
+                File = file;
+                Line = line;
+            }
+
+            public override string ToString()
+            {
+                return base.ToString();
+            }
+            public override string GetFileName()
+            {
+                return File;
+            }
+            public override int GetFileLineNumber()
+            {
+                return Line;
+            }
+        }
+
         private class PythonExceptionChecker : IDisposable
         {
             [DebuggerHidden]
@@ -1272,16 +1400,36 @@ namespace Python
         {
             get
             {
-                return base.StackTrace;
+                return frames.Reverse<StackFrame>()
+                             .Select(f =>
+                             {
+                                 StringBuilder result = new StringBuilder();
+
+                                 result.Append("   à ");
+                                 result.Append((f as PythonStackFrame)?.Function ?? f.GetMethod().ToString());
+
+                                 if (!string.IsNullOrEmpty(f.GetFileName()))
+                                     result.Append($" dans {f.GetFileName()}:ligne {f.GetFileLineNumber()}");
+
+                                 return result;
+                             })
+                             .Join(Environment.NewLine);
             }
         }
-
-        private List<string> stackTrace = new List<string>();
+        private List<StackFrame> frames = new List<StackFrame>();
 
         internal PythonException(IntPtr type, IntPtr value, IntPtr traceback) : base(GetExceptionMessage(type, value))
         {
+            // Dump .NET callstack
+            StackTrace trace = new StackTrace(2, true);
+            frames.AddRange(trace.GetFrames().Reverse());
+
+            // Dump Python callstack
             while (traceback != IntPtr.Zero)
             {
+                if (PyObject_HasAttrString(traceback, "tb_frame") == 0)
+                    break;
+
                 IntPtr framePointer = PyObject_GetAttrString(traceback, "tb_frame");
                 if (framePointer == IntPtr.Zero)
                     break;
@@ -1291,10 +1439,11 @@ namespace Python
                 IntPtr filePointer = PyObject_GetAttrString(codePointer, "co_filename");
                 IntPtr functionPointer = PyObject_GetAttrString(codePointer, "co_name");
 
-                int line = Python.PyLong_AsLong(linePointer);
+                int line = PyLong_AsLong(linePointer);
                 string file = Marshal.PtrToStringAnsi(PyString_AsString(filePointer));
                 string function = Marshal.PtrToStringAnsi(PyString_AsString(functionPointer));
-                
+
+                frames.Add(new PythonStackFrame(function, file, line));
                 traceback = PyObject_GetAttrString(traceback, "tb_next");
             }
 
@@ -1306,7 +1455,24 @@ namespace Python
 
         private static string GetExceptionMessage(IntPtr type, IntPtr value)
         {
-            return Marshal.PtrToStringAnsi(PyString_AsString(PyObject_Str(value)));
+            if (value == IntPtr.Zero)
+                return "";
+
+            IntPtr objectStr = PyObject_Str(value);
+            if (objectStr == IntPtr.Zero)
+                return "";
+
+            IntPtr cStr = PyString_AsString(objectStr);
+            if (cStr == IntPtr.Zero)
+                return "";
+
+            string message = Marshal.PtrToStringAnsi(cStr);
+
+#if DEBUG
+            Console.Error.WriteLine("PythonException: " + message);
+#endif
+
+            return message;
         }
     }
 }
