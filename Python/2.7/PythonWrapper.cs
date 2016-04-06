@@ -1400,20 +1400,19 @@ namespace Python
         {
             get
             {
-                return frames.Reverse<StackFrame>()
-                             .Select(f =>
-                             {
-                                 StringBuilder result = new StringBuilder();
+                return string.Join(Environment.NewLine, frames.Reverse<StackFrame>()
+                                                              .Select(f =>
+                                                              {
+                                                                  StringBuilder result = new StringBuilder();
 
-                                 result.Append("   à ");
-                                 result.Append((f as PythonStackFrame)?.Function ?? f.GetMethod().ToString());
+                                                                  result.Append("   à ");
+                                                                  result.Append((f as PythonStackFrame)?.Function ?? f.GetMethod().ToString());
 
-                                 if (!string.IsNullOrEmpty(f.GetFileName()))
-                                     result.Append($" dans {f.GetFileName()}:ligne {f.GetFileLineNumber()}");
+                                                                  if (!string.IsNullOrEmpty(f.GetFileName()))
+                                                                      result.Append($" dans {f.GetFileName()}:ligne {f.GetFileLineNumber()}");
 
-                                 return result;
-                             })
-                             .Join(Environment.NewLine);
+                                                                  return result;
+                                                              }));
             }
         }
         private List<StackFrame> frames = new List<StackFrame>();

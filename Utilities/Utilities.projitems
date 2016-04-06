@@ -15,9 +15,15 @@
     <Compile Include="$(MSBuildThisFileDirectory)Extensions\Collections\Generic\IEnumerable.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Extensions\Collections\Generic\List.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Extensions\ComponentModel\BackgroundWorker.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Extensions\Exception.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Extensions\Random.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Extensions\String.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Extensions\Type.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Log.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Windows\Api\Data\Constants.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Windows\Api\Data\Structures.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Windows\Api\Kernel32.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Windows\Api\User32.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Windows\Interop\User32\KeyboardHook.cs" />
   </ItemGroup>
 </Project>
