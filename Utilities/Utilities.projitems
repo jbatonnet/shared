@@ -10,6 +10,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="$(MSBuildThisFileDirectory)Error.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Extensions\Array.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Extensions\Byte.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Extensions\Collections\Generic\IDictionary.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Extensions\Collections\Generic\IEnumerable.cs" />
@@ -24,6 +25,8 @@
     <Compile Include="$(MSBuildThisFileDirectory)Windows\Api\Data\Structures.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Windows\Api\Kernel32.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Windows\Api\User32.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Windows\Interop\User32\KeyboardHook.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <Folder Include="$(MSBuildThisFileDirectory)Windows\Interop\User32\" />
   </ItemGroup>
 </Project>

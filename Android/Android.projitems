@@ -10,6 +10,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="$(MSBuildThisFileDirectory)Data\AndroidDatabaseConnection.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Graphics\Drawables\Drawable.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SimpleRunnable.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)DividerItemDecoration.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Layout\WrapLayoutManager.cs" />

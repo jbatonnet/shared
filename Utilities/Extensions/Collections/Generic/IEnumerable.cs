@@ -67,6 +67,10 @@ namespace System.Collections.Generic
         {
             return string.Join(separator, me);
         }
+        public static string Join<T>(this IEnumerable<T> me, Func<T, string> stringifier, string separator = "")
+        {
+            return string.Join(separator, me.Select(stringifier));
+        }
 
         // Dictionaries
         public static Dictionary<TKey, TValue> ToDictionary<TKey, TValue>(this IEnumerable<KeyValuePair<TKey, TValue>> me)
