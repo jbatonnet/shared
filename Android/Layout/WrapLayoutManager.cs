@@ -32,8 +32,7 @@ namespace Android.Utilities
         private static int _overScrollMode = ViewCompat.OverScrollAlways;
         private static RecyclerView _view;
 
-        public WrapLayoutManager(Context context, int orientation, bool reverseLayout)
-            : base(context, orientation, reverseLayout)
+        public WrapLayoutManager(Context context, int orientation, bool reverseLayout) : base(context, orientation, reverseLayout)
         {
             _view = null;
         }
@@ -49,8 +48,7 @@ namespace Android.Utilities
             _overScrollMode = ViewCompat.GetOverScrollMode(view);
         }
 
-        public WrapLayoutManager(RecyclerView view, int orientation, bool reverseLayout)
-            : base(view.Context, orientation, reverseLayout)
+        public WrapLayoutManager(RecyclerView view, int orientation, bool reverseLayout) : base(view.Context, orientation, reverseLayout)
         {
             _view = view;
             _overScrollMode = ViewCompat.GetOverScrollMode(view);
@@ -70,8 +68,7 @@ namespace Android.Utilities
             return View.MeasureSpec.MakeMeasureSpec(0, MeasureSpecMode.Unspecified);
         }
 
-        public override void OnMeasure(RecyclerView.Recycler recycler, RecyclerView.State state, int widthSpec,
-            int heightSpec)
+        public override void OnMeasure(RecyclerView.Recycler recycler, RecyclerView.State state, int widthSpec, int heightSpec)
         {
             var widthMode = View.MeasureSpec.GetMode(widthSpec);
             var heightMode = View.MeasureSpec.GetMode(heightSpec);
@@ -79,8 +76,9 @@ namespace Android.Utilities
             var widthSize = View.MeasureSpec.GetSize(widthSpec);
             var heightSize = View.MeasureSpec.GetSize(heightSpec);
 
-            var hasWidthSize = widthMode != MeasureSpecMode.Unspecified;
-            var hasHeightSize = heightMode != MeasureSpecMode.Unspecified;
+            bool hasWidthSize = widthMode != MeasureSpecMode.Unspecified;
+            bool hasHeightSize = heightMode != MeasureSpecMode.Unspecified;
+            bool hasFixedSize = _view?.HasFixedSize == true;
 
             var exactWidth = widthMode == MeasureSpecMode.Exactly;
             var exactHeight = heightMode == MeasureSpecMode.Exactly;
@@ -139,6 +137,11 @@ namespace Android.Utilities
                     {
                         break;
                     }
+                    if (hasFixedSize)
+                    {
+                        height *= adapterItemCount;
+                        break;
+                    }
                 }
                 else
                 {
@@ -163,6 +166,11 @@ namespace Android.Utilities
                     }
                     if (hasWidthSize && width >= widthSize)
                     {
+                        break;
+                    }
+                    if (hasFixedSize)
+                    {
+                        width *= adapterItemCount;
                         break;
                     }
                 }
@@ -245,8 +253,7 @@ namespace Android.Utilities
             RequestLayout();
         }
 
-        private void MeasureChild(RecyclerView.Recycler recycler, int position, int widthSize, int heightSize,
-            int[] dimensions)
+        private void MeasureChild(RecyclerView.Recycler recycler, int position, int widthSize, int heightSize, int[] dimensions)
         {
             View child = null;
             try
