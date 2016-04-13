@@ -201,6 +201,7 @@ namespace Android.Utilities
         {
             return cursor.IsNull(ordinal);
         }
+
         public override bool NextResult()
         {
             return !cursor.IsLast;
@@ -208,6 +209,14 @@ namespace Android.Utilities
         public override bool Read()
         {
             return cursor.MoveToNext();
+        }
+        public override void Close()
+        {
+            cursor.Close();
+        }
+        public override DataTable GetSchemaTable()
+        {
+            throw new NotImplementedException();
         }
     }
 
