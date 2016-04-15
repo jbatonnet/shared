@@ -325,8 +325,7 @@ namespace Android.Utilities
 
         public override void Cancel()
         {
-            if (cancellationSignal != null)
-                cancellationSignal.Cancel();
+            cancellationSignal?.Cancel();
         }
         [DebuggerHidden]
         public override int ExecuteNonQuery()
@@ -337,10 +336,17 @@ namespace Android.Utilities
         [DebuggerHidden]
         public override object ExecuteScalar()
         {
-            cancellationSignal = new CancellationSignal();
+            ICursor cursor = null;
 
-            ICursor cursor = database.RawQuery(query, new string[0], cancellationSignal);
-            cancellationSignal = null;
+            if (Build.VERSION.SdkInt >= BuildVersionCodes.JellyBean)
+            {
+                cancellationSignal = new CancellationSignal();
+
+                cursor = database.RawQuery(query, new string[0], cancellationSignal);
+                cancellationSignal = null;
+            }
+            else
+                cursor = database.RawQuery(query, new string[0]);
 
             AndroidDatabaseReader reader = new AndroidDatabaseReader(cursor);
 
@@ -362,11 +368,18 @@ namespace Android.Utilities
         [DebuggerHidden]
         protected override DbDataReader ExecuteDbDataReader(CommandBehavior behavior)
         {
-            cancellationSignal = new CancellationSignal();
+            ICursor cursor = null;
 
-            ICursor cursor = database.RawQuery(query, new string[0], cancellationSignal);
+            if (Build.VERSION.SdkInt >= BuildVersionCodes.JellyBean)
+            {
+                cancellationSignal = new CancellationSignal();
 
-            cancellationSignal = null;
+                cursor = database.RawQuery(query, new string[0], cancellationSignal);
+                cancellationSignal = null;
+            }
+            else
+                cursor = database.RawQuery(query, new string[0]);
+
             return new AndroidDatabaseReader(cursor);
         }
     }
