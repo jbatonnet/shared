@@ -21,13 +21,18 @@ namespace System
 
     public static class Log
     {
-        public static TextWriter TraceStream;
-        public static TextWriter DebugStream;
-        public static TextWriter InfoStream;
-        public static TextWriter WarningStream;
-        public static TextWriter ErrorStream;
+        public static TextWriter TraceStream { get; set; }
+        public static TextWriter DebugStream { get; set; }
+        public static TextWriter InfoStream { get; set; }
+        public static TextWriter WarningStream { get; set; }
+        public static TextWriter ErrorStream { get; set; }
 
-        public static LogVerbosity Verbosity { get; set; } = LogVerbosity.Info;
+        public static LogVerbosity Verbosity { get; set; } =
+#if DEBUG
+            LogVerbosity.Debug;
+#else
+            LogVerbosity.Warning;
+#endif
 
         private static object mutex = new object();
 

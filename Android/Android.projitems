@@ -12,6 +12,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)Components\TopAlignedImageView.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Data\AndroidDatabaseConnection.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Graphics\Drawables\Drawable.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)LogcatWriter.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SimpleRunnable.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)DividerItemDecoration.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Layout\WrapLayoutManager.cs" />
