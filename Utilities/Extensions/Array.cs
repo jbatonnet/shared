@@ -10,7 +10,7 @@ namespace System
         public static int IndexOf<T>(this T[] me, T item)
         {
             for (int i = 0; i < me.Length; i++)
-                if (me[i].Equals(item))
+                if (me[i]?.Equals(item) == true)
                     return i;
 
             return -1;
