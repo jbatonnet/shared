@@ -22,12 +22,5 @@
     <Compile Include="$(MSBuildThisFileDirectory)Extensions\Type.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FileLogWriter.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Log.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Windows\Api\Data\Constants.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Windows\Api\Data\Structures.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Windows\Api\Kernel32.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Windows\Api\User32.cs" />
-  </ItemGroup>
-  <ItemGroup>
-    <Folder Include="$(MSBuildThisFileDirectory)Windows\Interop\User32\" />
   </ItemGroup>
 </Project>
