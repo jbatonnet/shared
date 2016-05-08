@@ -71,6 +71,20 @@ namespace System.Collections.Generic
         {
             return string.Join(separator, me.Select(stringifier));
         }
+        public static int IndexOf<T>(this IEnumerable<T> me, T item)
+        {
+            int i = 0;
+
+            foreach (T value in me)
+            {
+                if (value?.Equals(item) == true)
+                    return i;
+
+                i++;
+            }
+
+            return -1;
+        }
 
         // Dictionaries
         public static Dictionary<TKey, TValue> ToDictionary<TKey, TValue>(this IEnumerable<KeyValuePair<TKey, TValue>> me)
