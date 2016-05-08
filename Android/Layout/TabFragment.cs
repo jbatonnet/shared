@@ -28,8 +28,8 @@ namespace Android.Utilities
 {
     public abstract class TabFragment : Fragment
     {
-        public abstract ICharSequence Title { get; }
+        public abstract string Title { get; }
 
-        public abstract void Refresh();
+        public virtual void Refresh() { }
     }
 }

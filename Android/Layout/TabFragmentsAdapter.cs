@@ -27,7 +27,7 @@ namespace Android.Utilities
 
         public TabFragmentsAdapter(FragmentManager fragmentManager, params TabFragment[] fragments) : base(fragmentManager)
         {
-            fragments = fragments;
+            this.fragments = fragments;
         }
 
         public override Fragment GetItem(int position)
@@ -36,7 +36,7 @@ namespace Android.Utilities
         }
         public override ICharSequence GetPageTitleFormatted(int position)
         {
-            return fragments[position].Title;
+            return new Java.Lang.String(fragments[position].Title);
         }
     }
 }
