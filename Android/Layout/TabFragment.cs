@@ -30,6 +30,18 @@ namespace Android.Utilities
     {
         public abstract string Title { get; }
 
+        protected virtual void OnGotFocus() { }
+        protected virtual void OnLostFocus() { }
+
         public virtual void Refresh() { }
+        public override void SetMenuVisibility(bool visible)
+        {
+            base.SetMenuVisibility(visible);
+
+            if (visible)
+                OnGotFocus();
+            else
+                OnLostFocus();
+        }
     }
 }
