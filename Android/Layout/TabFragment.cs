@@ -38,10 +38,27 @@ namespace Android.Utilities
         {
             base.SetMenuVisibility(visible);
 
-            if (visible)
+            /*if (visible)
                 OnGotFocus();
             else
-                OnLostFocus();
+                OnLostFocus();*/
+        }
+
+        public override bool UserVisibleHint
+        {
+            get
+            {
+                return base.UserVisibleHint;
+            }
+            set
+            {
+                base.UserVisibleHint = value;
+
+                if (value)
+                    OnGotFocus();
+                else
+                    OnLostFocus();
+            }
         }
     }
 }
