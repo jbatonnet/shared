@@ -59,6 +59,7 @@ namespace System.Collections.Generic
 
                 if (keys.Contains(key, comparer))
                     continue;
+                keys.Add(key);
 
                 yield return item;
             }
