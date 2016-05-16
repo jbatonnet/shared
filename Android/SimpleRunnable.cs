@@ -18,24 +18,18 @@ using Java.Lang;
 
 namespace Android.Utilities
 {
-    public class SimpleRunnable : IRunnable
+    public class SimpleRunnable : Java.Lang.Object, IRunnable
     {
-        public IntPtr Handle
-        {
-            get
-            {
-                throw new NotImplementedException();
-            }
-        }
+        private Action action;
 
-        public void Dispose()
+        public SimpleRunnable(Action action)
         {
-            throw new NotImplementedException();
+            this.action = action;
         }
 
         public void Run()
         {
-            throw new NotImplementedException();
+            action();
         }
     }
 }
