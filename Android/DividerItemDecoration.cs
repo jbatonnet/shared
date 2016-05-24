@@ -58,8 +58,10 @@ namespace Android.Utilities
             {
                 View child = parent.GetChildAt(i);
                 RecyclerView.LayoutParams parameters = (RecyclerView.LayoutParams)child.LayoutParameters;
+
                 int top = child.Bottom + parameters.BottomMargin;
                 int bottom = top + mDivider.IntrinsicHeight;
+
                 mDivider.SetBounds(left, top, right, bottom);
                 mDivider.Draw(c);
             }
@@ -75,8 +77,10 @@ namespace Android.Utilities
             {
                 View child = parent.GetChildAt(i);
                 RecyclerView.LayoutParams parameters = (RecyclerView.LayoutParams)child.LayoutParameters;
+
                 int left = child.Right + parameters.RightMargin;
                 int right = left + mDivider.IntrinsicHeight;
+
                 mDivider.SetBounds(left, top, right, bottom);
                 mDivider.Draw(c);
             }
