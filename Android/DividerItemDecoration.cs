@@ -23,9 +23,12 @@ namespace Android.Utilities
         private static int[] ATTRS = new int[]{ global::Android.Resource.Attribute.ListDivider };
         private Drawable mDivider;
         private int mOrientation;
+        private bool showFirstDivider;
 
-        public DividerItemDecoration(Context context, int orientation)
+        public DividerItemDecoration(Context context, int orientation, bool showFirstDivider = false)
         {
+            this.showFirstDivider = showFirstDivider;
+
             TypedArray a = context.ObtainStyledAttributes(ATTRS);
             mDivider = a.GetDrawable(0);
             a.Recycle();
@@ -54,6 +57,19 @@ namespace Android.Utilities
             int right = parent.Width - parent.PaddingRight;
 
             int childCount = parent.ChildCount;
+
+            if (childCount > 0 && showFirstDivider)
+            {
+                View child = parent.GetChildAt(0);
+                RecyclerView.LayoutParams parameters = (RecyclerView.LayoutParams)child.LayoutParameters;
+
+                int top = child.Top;
+                int bottom = top + mDivider.IntrinsicHeight;
+
+                mDivider.SetBounds(left, top, right, bottom);
+                mDivider.Draw(c);
+            }
+
             for (int i = 0; i < childCount; i++)
             {
                 View child = parent.GetChildAt(i);
@@ -89,7 +105,10 @@ namespace Android.Utilities
         public override void GetItemOffsets(Rect outRect, int itemPosition, RecyclerView parent)
         {
             if (mOrientation == LinearLayoutManager.Vertical)
-                outRect.Set(0, 0, 0, mDivider.IntrinsicHeight);
+                if (showFirstDivider)
+                    outRect.Set(0, mDivider.IntrinsicHeight, 0, 0);
+                else
+                    outRect.Set(0, 0, 0, mDivider.IntrinsicHeight);
             else
                 outRect.Set(0, 0, mDivider.IntrinsicWidth, 0);
         }
