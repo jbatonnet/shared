@@ -9,6 +9,7 @@
     <Import_RootNamespace>Model</Import_RootNamespace>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)ObjectDatabase.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)ObjectProxy.cs" />
   </ItemGroup>
 </Project>

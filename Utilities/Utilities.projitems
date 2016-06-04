@@ -18,6 +18,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)Extensions\ComponentModel\BackgroundWorker.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Extensions\Data\DbConnection.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Extensions\Exception.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Extensions\IO\Stream.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Extensions\Random.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Extensions\String.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Extensions\Type.cs" />
