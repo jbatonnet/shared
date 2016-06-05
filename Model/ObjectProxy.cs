@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using System.Runtime.Remoting.Channels;
 using System.Runtime.Remoting.Messaging;
@@ -10,16 +11,32 @@ public class ObjectProxy<T> : RealProxy where T : class
 {
     public T Object { get; }
 
+    private PropertyInfo[] properties;
+
     public ObjectProxy(T obj) : base(typeof(T))
     {
         Object = obj;
+
+        Type type = typeof(T);
+        properties = type.GetProperties(BindingFlags.Public | BindingFlags.Instance);
     }
 
     public override IMessage Invoke(IMessage message)
     {
         IMethodCallMessage methodCallMessage = message as IMethodCallMessage;
         if (methodCallMessage != null)
-            OnMethodCall(methodCallMessage.MethodBase);
+        {
+            MethodBase method = methodCallMessage.MethodBase;
+            OnMethodCall(method);
+
+            foreach (PropertyInfo property in properties)
+            {
+                if (property.GetMethod == method)
+                    OnPropertyGet(property);
+                else if (property.SetMethod == method)
+                    OnPropertySet(property);
+            }
+        }
 
         return ChannelServices.SyncDispatchMessage(message);
     }
