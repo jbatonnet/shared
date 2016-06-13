@@ -9,6 +9,8 @@
     <Import_RootNamespace>Android.Utilities</Import_RootNamespace>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)Activities\BaseActivity.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)BaseApplication.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Components\TopAlignedImageView.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Data\AndroidDatabaseConnection.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Graphics\Drawables\Drawable.cs" />

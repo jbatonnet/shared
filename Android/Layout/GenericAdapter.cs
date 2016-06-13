@@ -17,6 +17,7 @@ namespace Android.Utilities
     public abstract class GenericResourceBinder<T>
     {
         public abstract void Bind(View view, T item);
+        public abstract void Unbind(View view, T item);
     }
     public class GenericResourceAutoBinder<T> : GenericResourceBinder<T>
     {
@@ -45,19 +46,31 @@ namespace Android.Utilities
                 pair.Value(binderView, item);
             }
         }
+        public override void Unbind(View view, T item)
+        {
+        }
     }
     public class GenericResourceManualBinder<T> : GenericResourceBinder<T>
     {
-        private Action<View, T> resourceBinder;
+        private Action<View, T> bind, unbind;
 
-        public GenericResourceManualBinder(Action<View, T> resourceBinder)
+        public GenericResourceManualBinder(Action<View, T> bind)
         {
-            this.resourceBinder = resourceBinder;
+            this.bind = bind;
+        }
+        public GenericResourceManualBinder(Action<View, T> bind, Action<View, T> unbind)
+        {
+            this.bind = bind;
+            this.unbind = unbind;
         }
 
         public override void Bind(View view, T item)
         {
-            resourceBinder?.Invoke(view, item);
+            bind?.Invoke(view, item);
+        }
+        public override void Unbind(View view, T item)
+        {
+            unbind?.Invoke(view, item);
         }
     }
 
@@ -147,7 +160,7 @@ namespace Android.Utilities
             Items = items;
 
             this.layoutId = layoutId;
-            this.resourceBinder = new GenericResourceManualBinder<T>(OnBind);
+            this.resourceBinder = new GenericResourceManualBinder<T>(OnBind, OnUnbind);
         }
 
         public GenericAdapter(int layoutId, Action<View, T> resourceBinder) : this(Enumerable.Empty<T>(), layoutId, new GenericResourceManualBinder<T>(resourceBinder)) { }
@@ -162,6 +175,7 @@ namespace Android.Utilities
         }
 
         protected virtual void OnBind(View view, T item) { }
+        protected virtual void OnUnbind(View view, T item) { }
         protected virtual void OnClick(View view, T item)
         {
             Click?.Invoke(this, view, item);
@@ -185,7 +199,6 @@ namespace Android.Utilities
             if (refresh)
                 Refresh();
         }
-
         private void Refresh()
         {
             foreach (GenericRecyclerViewAdapter<T> adapter in recyclerViewAdapters)
@@ -223,7 +236,7 @@ namespace Android.Utilities
         private T[] items;
         private int layoutId;
         private GenericResourceBinder<T> resourceBinder;
-        private Dictionary<T, GenericRecyclerViewHolder<T>> itemViewHolders = new Dictionary<T, GenericRecyclerViewHolder<T>>();
+        private Association<T, GenericRecyclerViewHolder<T>> itemViewHolders = new Association<T, GenericRecyclerViewHolder<T>>();
 
         public GenericRecyclerViewAdapter(T[] items, int layoutId, GenericResourceBinder<T> resourceBinder)
         {
@@ -248,16 +261,30 @@ namespace Android.Utilities
 
             resourceBinder.Bind(viewHolder.ItemView, item);
         }
+        public override void OnViewDetachedFromWindow(Java.Lang.Object holder)
+        {
+            GenericRecyclerViewHolder<T> viewHolder = holder as GenericRecyclerViewHolder<T>;
+            T item = itemViewHolders[viewHolder];
 
+            resourceBinder.Unbind(viewHolder.ItemView, item);
+        }
         public void Refresh(T[] items)
         {
             this.items = items;
             NotifyDataSetChanged();
         }
 
+        public T GetItemFromView(View view)
+        {
+            GenericRecyclerViewHolder<T> viewHolder = itemViewHolders.Right.First(vh => vh.ItemView == view);
+            T item = items[viewHolder.AdapterPosition];
+
+            return item;
+        }
+
         void View.IOnClickListener.OnClick(View view)
         {
-            GenericRecyclerViewHolder<T> viewHolder = itemViewHolders.Values.First(vh => vh.ItemView == view);
+            GenericRecyclerViewHolder<T> viewHolder = itemViewHolders.Right.First(vh => vh.ItemView == view);
             T item = items[viewHolder.AdapterPosition];
 
             Click?.Invoke(viewHolder.ItemView, item);
