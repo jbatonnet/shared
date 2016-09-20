@@ -1,8 +1,8 @@
 ﻿using Android.OS;
+using Android.Views;
 using Android.Support.Design.Widget;
 using Android.Support.V7.App;
 using Android.Support.V7.Widget;
-using Android.Views;
 
 namespace Android.Utilities
 {

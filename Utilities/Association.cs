@@ -65,6 +65,15 @@ namespace System
         private Dictionary<TLeft, TRight> leftToRight = new Dictionary<TLeft, TRight>();
         private Dictionary<TRight, TLeft> rightToLeft = new Dictionary<TRight, TLeft>();
 
+        public void Add(TLeft left, TRight right)
+        {
+            if (leftToRight.ContainsKey(left))
+                throw new NotSupportedException();
+
+            leftToRight[left] = right;
+            rightToLeft[right] = left;
+        }
+
         public bool TryGetLeft(TRight right, out TLeft left)
         {
             return rightToLeft.TryGetValue(right, out left);

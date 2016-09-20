@@ -276,7 +276,10 @@ namespace Android.Utilities
 
         public T GetItemFromView(View view)
         {
-            GenericRecyclerViewHolder<T> viewHolder = itemViewHolders.Right.First(vh => vh.ItemView == view);
+            GenericRecyclerViewHolder<T> viewHolder = itemViewHolders.Right.FirstOrDefault(vh => vh.ItemView == view);
+            if (viewHolder == null)
+                return null; // FIXME
+
             T item = items[viewHolder.AdapterPosition];
 
             return item;
@@ -284,7 +287,10 @@ namespace Android.Utilities
 
         void View.IOnClickListener.OnClick(View view)
         {
-            GenericRecyclerViewHolder<T> viewHolder = itemViewHolders.Right.First(vh => vh.ItemView == view);
+            GenericRecyclerViewHolder<T> viewHolder = itemViewHolders.Right.FirstOrDefault(vh => vh.ItemView == view);
+            if (viewHolder == null)
+                return; // FIXME
+
             T item = items[viewHolder.AdapterPosition];
 
             Click?.Invoke(viewHolder.ItemView, item);

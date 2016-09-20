@@ -33,7 +33,7 @@ namespace Android.Utilities
 
         private AndroidDatabaseConnection database;
 
-        public BaseApplication(IntPtr handle, JniHandleOwnership transfer) : base(handle, transfer)
+        protected BaseApplication(IntPtr handle, JniHandleOwnership transfer) : base(handle, transfer)
         {
             Instance = this;
 
@@ -51,8 +51,7 @@ namespace Android.Utilities
 
         public void StartService(Type type)
         {
-            Intent intent = new Intent(this, type);
-            StartService(intent);
+            (this as ContextWrapper).StartService(type);
         }
     }
 }
