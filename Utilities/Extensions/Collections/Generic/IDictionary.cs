@@ -49,19 +49,5 @@ namespace System.Collections.Generic
 
             return default(TKey);
         }
-        public static bool TryGetKey<TKey, TValue>(this IDictionary<TKey, TValue> me, TValue value, out TKey key)
-        {
-            foreach (var pair in me)
-            {
-                if (!pair.Value.Equals(value))
-                    continue;
-
-                key = pair.Key;
-                return true;
-            }
-
-            key = default(TKey);
-            return false;
-        }
     }
 }

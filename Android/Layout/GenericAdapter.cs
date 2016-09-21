@@ -9,76 +9,74 @@ using Android.Runtime;
 using Android.Support.V4.App;
 using Android.Support.V7.Widget;
 using Android.Views;
+using Android.Widget;
+using Java.Lang;
 
 namespace Android.Utilities
 {
-    public delegate void GenericResourceBinder(View v);
-
-    public class GenericRecyclerViewHolder<T> : RecyclerView.ViewHolder
+    public abstract class GenericResourceBinder<T>
     {
-        public Dictionary<int, View> Views { get; } = new Dictionary<int, View>();
-
-        public GenericRecyclerViewHolder(View view, IEnumerable<int> resourceIds) : base(view)
-        {
-            foreach (int resourceId in resourceIds)
-                Views.Add(resourceId, view.FindViewById(resourceId));
-        }
+        public abstract void Bind(View view, T item);
+        public abstract void Unbind(View view, T item);
     }
-    public class GenericRecyclerViewAdapter<T> : RecyclerView.Adapter, View.IOnClickListener where T : class
+    public class GenericResourceAutoBinder<T> : GenericResourceBinder<T>
     {
-        public override int ItemCount
+        private Dictionary<int, Action<View, T>> resourceBinders = new Dictionary<int, Action<View, T>>();
+        private Dictionary<View, Dictionary<int, View>> resourceViews = new Dictionary<View, Dictionary<int, View>>();
+
+        public GenericResourceAutoBinder(IDictionary<int, Action<View, T>> resourceBinders)
         {
-            get
-            {
-                return items.Length;
-            }
+            this.resourceBinders = resourceBinders.ToDictionary();
         }
 
-        private int layoutId;
-        private Dictionary<int, GenericResourceBinder> resourceBinders = new Dictionary<int, GenericResourceBinder>();
-        private Dictionary<T, GenericRecyclerViewHolder<T>> itemViewHolders = new Dictionary<T, GenericRecyclerViewHolder<T>>();
-
-        private T[] items;
-
-        public GenericRecyclerViewAdapter(T[] items, int layoutId, Dictionary<int, GenericResourceBinder> resourceBinders)
+        public override void Bind(View view, T item)
         {
-            this.items = items;
-            this.layoutId = layoutId;
-        }
+            Dictionary<int, View> views;
 
-        public override RecyclerView.ViewHolder OnCreateViewHolder(ViewGroup parent, int viewType)
-        {
-            View view = LayoutInflater.From(parent.Context).Inflate(layoutId, parent, false);
-
-            view.SetOnClickListener(this);
-
-            return new GenericRecyclerViewHolder<T>(view, resourceBinders.Keys);
-        }
-        public override void OnBindViewHolder(RecyclerView.ViewHolder holder, int position)
-        {
-            GenericRecyclerViewHolder<T> viewHolder = holder as GenericRecyclerViewHolder<T>;
-            T item = items[position];
-            itemViewHolders[item] = viewHolder;
+            if (!resourceViews.TryGetValue(view, out views))
+                resourceViews.Add(view, views = new Dictionary<int, View>());
 
             foreach (var pair in resourceBinders)
             {
-                View view = viewHolder.Views[pair.Key];
-                pair.Value(view);
+                View binderView;
+
+                if (!views.TryGetValue(pair.Key, out binderView))
+                    views.Add(pair.Key, binderView = view.FindViewById(pair.Key));
+
+                pair.Value(binderView, item);
             }
         }
-
-        public void Refresh(T[] items)
+        public override void Unbind(View view, T item)
         {
-            this.items = items;
-            NotifyDataSetChanged();
-        }
-
-        void View.IOnClickListener.OnClick(View view)
-        {
-            GenericRecyclerViewHolder<T> viewHolder = itemViewHolders.Values.First(vh => vh.ItemView == view);
-            T item = items[viewHolder.AdapterPosition];
         }
     }
+    public class GenericResourceManualBinder<T> : GenericResourceBinder<T>
+    {
+        private Action<View, T> bind, unbind;
+
+        public GenericResourceManualBinder(Action<View, T> bind)
+        {
+            this.bind = bind;
+        }
+        public GenericResourceManualBinder(Action<View, T> bind, Action<View, T> unbind)
+        {
+            this.bind = bind;
+            this.unbind = unbind;
+        }
+
+        public override void Bind(View view, T item)
+        {
+            bind?.Invoke(view, item);
+        }
+        public override void Unbind(View view, T item)
+        {
+            unbind?.Invoke(view, item);
+        }
+    }
+
+    public delegate void GenericAdapterCallback<T>(GenericAdapter<T> adapter, View view, T item) where T : class;
+    public delegate void GenericAdapterItemCallback<T>(View view, T item) where T : class;
+    public delegate bool GenericAdapterFilter<T>(T item, string filter) where T : class;
 
     public class GenericAdapter<T> where T : class
     {
@@ -98,7 +96,7 @@ namespace Android.Utilities
                 Refresh();
             }
         }
-        public Func<T, bool> Filter
+        public GenericAdapterFilter<T> Filter
         {
             get
             {
@@ -107,6 +105,21 @@ namespace Android.Utilities
             set
             {
                 filter = value;
+
+                ApplyFilter(false);
+
+                Refresh();
+            }
+        }
+        public string FilterText
+        {
+            get
+            {
+                return filterText;
+            }
+            set
+            {
+                filterText = value;
 
                 ApplyFilter(false);
 
@@ -129,20 +142,43 @@ namespace Android.Utilities
             }
         }
 
+        public event GenericAdapterCallback<T> Click;
+
         private int layoutId;
-        private Dictionary<int, GenericResourceBinder> resourceBinders = new Dictionary<int, GenericResourceBinder>();
+        private GenericResourceBinder<T> resourceBinder;
 
         private T[] rawItems;
         private T[] filteredItems;
 
-        private Func<T, bool> filter;
+        private GenericAdapterFilter<T> filter;
+        private string filterText;
         private Comparer<T> sort;
 
-        public GenericAdapter(IEnumerable<T> items, int layoutId)
+        protected GenericAdapter(int layoutId) : this(Enumerable.Empty<T>(), layoutId) { }
+        protected GenericAdapter(IEnumerable<T> items, int layoutId)
         {
             Items = items;
 
             this.layoutId = layoutId;
+            this.resourceBinder = new GenericResourceManualBinder<T>(OnBind, OnUnbind);
+        }
+
+        public GenericAdapter(int layoutId, Action<View, T> resourceBinder) : this(Enumerable.Empty<T>(), layoutId, new GenericResourceManualBinder<T>(resourceBinder)) { }
+        public GenericAdapter(int layoutId, GenericResourceBinder<T> resourceBinder) : this(Enumerable.Empty<T>(), layoutId, resourceBinder) { }
+        public GenericAdapter(IEnumerable<T> items, int layoutId, Action<View, T> resourceBinder) : this(items, layoutId, new GenericResourceManualBinder<T>(resourceBinder)) { }
+        public GenericAdapter(IEnumerable<T> items, int layoutId, GenericResourceBinder<T> resourceBinder)
+        {
+            Items = items;
+
+            this.layoutId = layoutId;
+            this.resourceBinder = resourceBinder;
+        }
+
+        protected virtual void OnBind(View view, T item) { }
+        protected virtual void OnUnbind(View view, T item) { }
+        protected virtual void OnClick(View view, T item)
+        {
+            Click?.Invoke(this, view, item);
         }
 
         private void ApplyFilter(bool refresh = true)
@@ -150,7 +186,7 @@ namespace Android.Utilities
             if (filter == null)
                 filteredItems = rawItems;
             else
-                filteredItems = rawItems.Where(filter).ToArray();
+                filteredItems = rawItems.Where(i => filter(i, filterText)).ToArray();
 
             if (refresh)
                 Refresh();
@@ -163,7 +199,6 @@ namespace Android.Utilities
             if (refresh)
                 Refresh();
         }
-
         private void Refresh()
         {
             foreach (GenericRecyclerViewAdapter<T> adapter in recyclerViewAdapters)
@@ -173,9 +208,202 @@ namespace Android.Utilities
         private List<GenericRecyclerViewAdapter<T>> recyclerViewAdapters = new List<GenericRecyclerViewAdapter<T>>();
         public static implicit operator RecyclerView.Adapter(GenericAdapter<T> me)
         {
-            GenericRecyclerViewAdapter<T> adapter = new GenericRecyclerViewAdapter<T>(me.filteredItems, me.layoutId, me.resourceBinders);
+            GenericRecyclerViewAdapter<T> adapter = new GenericRecyclerViewAdapter<T>(me.filteredItems, me.layoutId, me.resourceBinder);
+            adapter.Click += me.OnClick;
+
             me.recyclerViewAdapters.Add(adapter);
             return adapter;
+        }
+    }
+
+    public class GenericRecyclerViewAdapter<T> : RecyclerView.Adapter, View.IOnClickListener where T : class
+    {
+        private class GenericRecyclerViewHolder<T> : RecyclerView.ViewHolder
+        {
+            public GenericRecyclerViewHolder(View view) : base(view) { }
+        }
+
+        public override int ItemCount
+        {
+            get
+            {
+                return items.Length;
+            }
+        }
+
+        public event GenericAdapterItemCallback<T> Click;
+
+        private T[] items;
+        private int layoutId;
+        private GenericResourceBinder<T> resourceBinder;
+        private Association<T, GenericRecyclerViewHolder<T>> itemViewHolders = new Association<T, GenericRecyclerViewHolder<T>>();
+
+        public GenericRecyclerViewAdapter(T[] items, int layoutId, GenericResourceBinder<T> resourceBinder)
+        {
+            this.items = items;
+            this.layoutId = layoutId;
+            this.resourceBinder = resourceBinder;
+        }
+
+        public override RecyclerView.ViewHolder OnCreateViewHolder(ViewGroup parent, int viewType)
+        {
+            View view = LayoutInflater.From(parent.Context).Inflate(layoutId, parent, false);
+
+            view.SetOnClickListener(this);
+
+            return new GenericRecyclerViewHolder<T>(view);
+        }
+        public override void OnBindViewHolder(RecyclerView.ViewHolder holder, int position)
+        {
+            GenericRecyclerViewHolder<T> viewHolder = holder as GenericRecyclerViewHolder<T>;
+            T item = items[position];
+            itemViewHolders[item] = viewHolder;
+
+            resourceBinder.Bind(viewHolder.ItemView, item);
+        }
+        public override void OnViewDetachedFromWindow(Java.Lang.Object holder)
+        {
+            GenericRecyclerViewHolder<T> viewHolder = holder as GenericRecyclerViewHolder<T>;
+            T item = itemViewHolders[viewHolder];
+
+            resourceBinder.Unbind(viewHolder.ItemView, item);
+        }
+        public void Refresh(T[] items)
+        {
+            this.items = items;
+            NotifyDataSetChanged();
+        }
+
+        public T GetItemFromView(View view)
+        {
+            GenericRecyclerViewHolder<T> viewHolder = itemViewHolders.Right.FirstOrDefault(vh => vh.ItemView == view);
+            if (viewHolder == null)
+                return null; // FIXME
+
+            T item = items[viewHolder.AdapterPosition];
+
+            return item;
+        }
+
+        void View.IOnClickListener.OnClick(View view)
+        {
+            GenericRecyclerViewHolder<T> viewHolder = itemViewHolders.Right.FirstOrDefault(vh => vh.ItemView == view);
+            if (viewHolder == null)
+                return; // FIXME
+
+            T item = items[viewHolder.AdapterPosition];
+
+            Click?.Invoke(viewHolder.ItemView, item);
+        }
+    }
+    public class GenericBaseAdapter<T> : BaseAdapter<T>, IFilterable, View.IOnClickListener where T : class
+    {
+        public class GenericBaseAdapterFilter : Filter
+        {
+            private GenericBaseAdapter<T> adapter;
+
+            public GenericBaseAdapterFilter(GenericBaseAdapter<T> adapter)
+            {
+                this.adapter = adapter;
+            }
+
+            protected override FilterResults PerformFiltering(ICharSequence constraint)
+            {
+                FilterResults filterResults = new FilterResults();
+
+                if (constraint == null)
+                    return filterResults;
+
+                string filterText = new string(constraint.Select(c => c).ToArray());
+                GenericAdapterFilter<T> filter = adapter.adapter.Filter;
+
+                T[] filteredItems = adapter.items.Where(i => filter(i, filterText)).ToArray();
+
+                filterResults.Values = FromArray(filteredItems.Select(i => new Java.Lang.String(i.ToString())).ToArray());
+                filterResults.Count = filteredItems.Length;
+
+                constraint.Dispose();
+
+                return filterResults;
+            }
+            protected override void PublishResults(ICharSequence constraint, FilterResults results)
+            {
+                string filterText = constraint == null ? null : new string(constraint.Select(c => c).ToArray());
+
+                adapter.adapter.FilterText = filterText;
+
+                constraint?.Dispose();
+                results.Dispose();
+            }
+        }
+
+        public override int Count
+        {
+            get { return items.Length; }
+        }
+        public Filter Filter { get; private set; }
+
+        public override T this[int position]
+        {
+            get
+            {
+                return items[position];
+            }
+        }
+
+        public event GenericAdapterItemCallback<T> Click;
+
+        private GenericAdapter<T> adapter;
+        private T[] items;
+        private int layoutId;
+        private GenericResourceBinder<T> resourceBinder;
+        private Dictionary<int, View> itemViews = new Dictionary<int, View>();
+
+        public GenericBaseAdapter(GenericAdapter<T> adapter, T[] items, int layoutId, GenericResourceBinder<T> resourceBinder)
+        {
+            this.adapter = adapter;
+            this.items = items;
+            this.layoutId = layoutId;
+            this.resourceBinder = resourceBinder;
+
+            Filter = new GenericBaseAdapterFilter(this);
+        }
+
+        public override long GetItemId(int position)
+        {
+            return position;
+        }
+        public override View GetView(int position, View convertView, ViewGroup parent)
+        {
+            T item = items[position];
+
+            View view = LayoutInflater.From(parent.Context).Inflate(layoutId, parent, false);
+            view.SetOnClickListener(this);
+
+            resourceBinder.Bind(view, item);
+            
+            return view;
+        }
+        public override void NotifyDataSetChanged()
+        {
+            // If you are using cool stuff like sections
+            // remember to update the indices here!
+            base.NotifyDataSetChanged();
+        }
+
+        public void Refresh(T[] items)
+        {
+            this.items = items;
+
+            NotifyDataSetChanged();
+        }
+
+        void View.IOnClickListener.OnClick(View view)
+        {
+            int position = itemViews.Values.IndexOf(view);
+            T item = items[position];
+
+            Click?.Invoke(view, item);
         }
     }
 }

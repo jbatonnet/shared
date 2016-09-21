@@ -23,8 +23,11 @@
     <Compile Include="$(MSBuildThisFileDirectory)Extensions\String.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Extensions\Type.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FileLogWriter.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Association.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)MathUtil.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Log.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)ObservableDictionary.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Profiling.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Util.cs" />
   </ItemGroup>
 </Project>

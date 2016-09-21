@@ -15,15 +15,32 @@ namespace System.Collections.Generic
 
             yield return value;
         }
+        public static IEnumerable<T> Concat<T>(this IEnumerable<T> me, params T[] values)
+        {
+            foreach (T item in me)
+                yield return item;
+
+            foreach (T value in values)
+                yield return value;
+
+        }
         public static IEnumerable<T> Except<T>(this IEnumerable<T> me, T value)
         {
             foreach (T item in me)
                 if (!item.Equals(value))
                     yield return item;
         }
+        public static T MinValue<T>(this IEnumerable<T> me, Func<T, int> predicate)
+        {
+            return me.OrderBy(predicate).FirstOrDefault();
+        }
         public static T MinValue<T>(this IEnumerable<T> me, Func<T, float> predicate)
         {
             return me.OrderBy(predicate).FirstOrDefault();
+        }
+        public static T MaxValue<T>(this IEnumerable<T> me, Func<T, int> predicate)
+        {
+            return me.OrderBy(predicate).LastOrDefault();
         }
         public static T MaxValue<T>(this IEnumerable<T> me, Func<T, float> predicate)
         {
@@ -85,6 +102,40 @@ namespace System.Collections.Generic
             }
 
             return -1;
+        }
+        public static int IndexOf<T>(this IEnumerable<T> me, Func<T, bool> predicate)
+        {
+            int i = 0;
+
+            foreach (T value in me)
+            {
+                if (predicate(value))
+                    return i;
+
+                i++;
+            }
+
+            return -1;
+        }
+        public static T FirstOrDefault<T>(this IEnumerable<T> me, Func<T, bool> predicate, T value)
+        {
+            IEnumerable<T> result = me.Where(predicate).Take(1);
+
+            IEnumerator<T> enumerator = result.GetEnumerator();
+            if (!enumerator.MoveNext())
+                return value;
+
+            return enumerator.Current;
+        }
+        public static T LastOrDefault<T>(this IEnumerable<T> me, Func<T, bool> predicate, T value)
+        {
+            IEnumerable<T> result = me.Reverse().Where(predicate).Take(1);
+
+            IEnumerator<T> enumerator = result.GetEnumerator();
+            if (!enumerator.MoveNext())
+                return value;
+
+            return enumerator.Current;
         }
 
         // Dictionaries

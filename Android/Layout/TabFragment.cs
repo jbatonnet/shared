@@ -1,16 +1,12 @@
-﻿using Android.Support.V4.App;
+﻿using Android.OS;
+using Android.Support.V4.App;
+using Android.Views;
 
 namespace Android.Utilities
 {
     public abstract class TabFragment : Fragment
     {
         public abstract string Title { get; }
-
-        protected virtual void OnGotFocus() { }
-        protected virtual void OnLostFocus() { }
-
-        public virtual void Refresh() { }
-
         public override bool UserVisibleHint
         {
             get
@@ -21,11 +17,27 @@ namespace Android.Utilities
             {
                 base.UserVisibleHint = value;
 
-                if (value)
-                    OnGotFocus();
-                else
-                    OnLostFocus();
+                if (View != null)
+                {
+                    if (value)
+                        OnGotFocus();
+                    else
+                        OnLostFocus();
+                }
             }
         }
+
+        private bool initialized = false;
+
+        public override void OnActivityCreated(Bundle savedInstanceState)
+        {
+            base.OnActivityCreated(savedInstanceState);
+
+            OnGotFocus();
+        }
+        protected virtual void OnGotFocus() { }
+        protected virtual void OnLostFocus() { }
+
+        public virtual void Refresh() { }
     }
 }
