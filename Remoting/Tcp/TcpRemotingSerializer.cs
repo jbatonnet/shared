@@ -23,7 +23,8 @@ namespace Remoting.Tcp
         RemoteObject,
         Exception,
         Buffer,
-        Array
+        Array,
+        Delegate
     }
 
     internal abstract class TcpRemotingSerializer : RemotingSerializer
@@ -44,7 +45,7 @@ namespace Remoting.Tcp
                 if (type.IsValueType || type == typeof(string))
                 {
                     writer.Write((byte)TcpRemotingType.Value);
-                    writer.Write(type.FullName);
+                    WriteType(stream, type);
                     writer.Write(typeConverter.ConvertToString(value));
                 }
                 else if (type == typeof(byte[]))
@@ -76,7 +77,7 @@ namespace Remoting.Tcp
             using (BinaryWriter writer = new BinaryWriter(stream, Encoding.Default, true))
             {
                 writer.Write((byte)TcpRemotingType.Exception);
-                writer.Write(exception.GetType().FullName);
+                WriteType(stream, exception.GetType());
                 writer.Write(exception.Message);
                 writer.Write(exception.StackTrace);
             }
@@ -102,23 +103,29 @@ namespace Remoting.Tcp
             }
         }
 
-        internal virtual object ReadObject(Stream stream)
+        internal object ReadObject(Stream stream)
         {
+            TcpRemotingType remotingType = (TcpRemotingType)stream.ReadByte();
+            return ReadObject(stream, remotingType);
+        }
+        internal virtual object ReadObject(Stream stream, TcpRemotingType remotingType)
+        {
+            switch (remotingType)
+            {
+                case TcpRemotingType.Null: return null;
+                case TcpRemotingType.Exception: return ReadException(stream);
+                case TcpRemotingType.RemoteObject: return ReadRemoteObject(stream);
+            }
+
             using (BinaryReader reader = new BinaryReader(stream, Encoding.Default, true))
             {
-                TcpRemotingType remotingType = (TcpRemotingType)reader.ReadByte();
                 switch (remotingType)
                 {
-                    case TcpRemotingType.Null: return null;
-                    case TcpRemotingType.Exception: return ReadException(stream);
-                    case TcpRemotingType.RemoteObject: return ReadRemoteObject(stream);
-
                     case TcpRemotingType.Value:
                     {
-                        string typeName = reader.ReadString();
+                        Type type = ReadType(stream);
                         string value = reader.ReadString();
 
-                        Type type = ResolveType(typeName);
                         TypeConverter typeConverter = TypeDescriptor.GetConverter(type);
 
                         return typeConverter.ConvertFromString(value);
@@ -152,7 +159,7 @@ namespace Remoting.Tcp
         {
             using (BinaryReader reader = new BinaryReader(stream, Encoding.Default, true))
             {
-                string exceptionTypeName = reader.ReadString();
+                Type exceptionType = ReadType(stream);
                 string exceptionMessage = reader.ReadString();
                 string exceptionStackTrace = reader.ReadString();
 

@@ -15,17 +15,8 @@ using System.Xml.Linq;
 
 namespace Remoting
 {
+    using RemoteId = Int32;
     using RemoteObject = MarshalByRefObject;
-
-    public class RemotingServerAttribute : Attribute
-    {
-        public string Name { get; }
-
-        public RemotingServerAttribute(string name)
-        {
-            Name = name;
-        }
-    }
 
     public abstract class RemotingServer
     {

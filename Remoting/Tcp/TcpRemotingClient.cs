@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Net.Sockets;
 using System.Runtime.Remoting.Messaging;
@@ -29,17 +28,11 @@ namespace Remoting.Tcp
                     RemoteId remoteId = reader.ReadInt32();
                     Type type = ReadType(stream);
 
-                    RemoteProxy remoteProxy;
-
-                    int index = Client.remoteIds.IndexOf(remoteId);
-                    if (index >= 0)
-                        remoteProxy = Client.remoteProxies[index];
-                    else
+                    RemoteProxy remoteProxy = Client.remoteProxyIndex.GetObject(remoteId);
+                    if (remoteProxy == null)
                     {
                         remoteProxy = new RemoteProxy(Client, remoteId, type);
-
-                        Client.remoteIds.Add(remoteId);
-                        Client.remoteProxies.Add(remoteProxy);
+                        Client.remoteProxyIndex.Register(remoteId, remoteProxy);
                     }
 
                     return remoteProxy.GetTransparentProxy() as RemoteObject;
@@ -50,8 +43,7 @@ namespace Remoting.Tcp
         public string Host { get; }
         public ushort Port { get; }
 
-        private List<RemoteId> remoteIds = new List<RemoteId>();
-        private List<RemoteProxy> remoteProxies = new List<RemoteProxy>();
+        private ObjectIndex<RemoteProxy> remoteProxyIndex = new ObjectIndex<RemoteProxy>();
 
         private Serializer serializer;
         private TcpClient tcpClient;

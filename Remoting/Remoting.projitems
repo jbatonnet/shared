@@ -12,6 +12,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)Http\HttpRemotingSerializer.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Http\HttpRemotingClient.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Http\HttpRemotingServer.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)ObjectIndex.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)RemotingSerializer.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)RemotingClient.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)RemotingServer.cs" />

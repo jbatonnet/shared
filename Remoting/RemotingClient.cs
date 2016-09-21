@@ -35,6 +35,12 @@ namespace Remoting
 
             public override IMessage Invoke(IMessage message)
             {
+                IMethodCallMessage methodCallMessage = message as IMethodCallMessage;
+
+                // Resolve GetType locally
+                if (methodCallMessage != null && methodCallMessage.MethodName == "GetType")
+                    return new ReturnMessage(GetProxiedType(), methodCallMessage.Args, methodCallMessage.ArgCount, methodCallMessage.LogicalCallContext, methodCallMessage);
+
                 Task<IMessage> task = Client.Invoke(Id, message);
                 task.Wait();
                 return task.Result;

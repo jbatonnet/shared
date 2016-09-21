@@ -5,6 +5,7 @@ using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Reflection;
+using System.Reflection.Emit;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -41,6 +42,50 @@ namespace Remoting.Http
 
                 return base.WrapObject(value);
             }
+            internal override object UnwrapObject(XElement element)
+            {
+                if (element != null && element.Name.LocalName == "Delegate")
+                {
+                    XAttribute idAttribute = element.Attribute("Id");
+                    RemoteId id = RemoteId.Parse(idAttribute.Value);
+
+                    Delegate target;
+                    if (Server.remoteDelegates.TryGetValue(id, out target))
+                        return target;
+
+                    XElement typeElement = element.Element("Type");
+                    XAttribute typeFullNameAttribute = typeElement.Attribute("FullName");
+                    XAttribute typeAssemblyAttribute = typeElement.Attribute("Assembly");
+
+                    // Decode remote type
+                    Type type = ResolveType(typeFullNameAttribute.Value);
+
+                    if (type == null)
+                    {
+                        foreach (XElement parentElement in typeElement.Elements("Parent"))
+                        {
+                            if (type != null)
+                                break;
+
+                            XAttribute parentFullNameAttribute = parentElement.Attribute("FullName");
+                            XAttribute parentAssemblyAttribute = parentElement.Attribute("Assembly");
+
+                            type = ResolveType(parentFullNameAttribute.Value);
+                        }
+                    }
+
+                    type = type ?? typeof(RemoteObject);
+
+                    // Create a proxy if needed
+                    target = CreateDelegate(type, id);
+                    Server.remoteDelegates.Add(id, target);
+
+                    return target;
+                }
+
+                return base.UnwrapObject(element);
+            }
+
             internal XElement WrapRemoteObject(RemoteId id, RemoteObject target)
             {
                 XElement objectElement = new XElement("RemoteObject");
@@ -63,6 +108,18 @@ namespace Remoting.Http
 
                 return objectElement;
             }
+            
+            protected override object OnDelegateCall(RemoteId remoteId, object[] args)
+            {
+                Queue<object[]> delegateCalls;
+
+                if (!Server.remoteDelegatesCalls.TryGetValue(remoteId, out delegateCalls))
+                    Server.remoteDelegatesCalls.Add(remoteId, delegateCalls = new Queue<object[]>());
+
+                delegateCalls.Enqueue(args);
+
+                return null;
+            }
         }
 
         private static Regex httpHeaderRegex = new Regex("^(?<Method>GET|POST) (?<Url>[^ ]+) HTTP/1.1$", RegexOptions.Compiled);
@@ -74,6 +131,9 @@ namespace Remoting.Http
         private Dictionary<RemoteId, RemoteObject> remoteObjects = new Dictionary<RemoteId, RemoteObject>();
         private Dictionary<RemoteObject, RemoteId> remoteObjectsIndices = new Dictionary<RemoteObject, RemoteId>();
         private RemoteId currentRemoteIndex = 1;
+
+        private Dictionary<RemoteId, Delegate> remoteDelegates = new Dictionary<RemoteId, Delegate>();
+        private Dictionary<RemoteId, Queue<object[]>> remoteDelegatesCalls = new Dictionary<RemoteId, Queue<object[]>>();
 
         private Serializer serializer;
         private TcpListener tcpListener;
@@ -120,63 +180,81 @@ namespace Remoting.Http
             while (!token.IsCancellationRequested)
             {
                 TcpClient client = tcpListener.AcceptTcpClient();
-                Stream clientStream = client.GetStream();
+                Task.Run(() => ProcessClient(client));
+            }
+        }
+        private void ProcessClient(TcpClient client)
+        {
+            Stream clientStream = client.GetStream();
 
-                try
+            try
+            {
+                string method;
+                string url;
+                XDocument requestDocument = null;
+
+                using (StreamReader requestReader = new StreamReader(clientStream, Encoding.UTF8, false, 128, true))
                 {
-                    string method;
-                    string url;
-                    XDocument requestDocument = null;
+                    string line = requestReader.ReadLine();
 
-                    using (StreamReader requestReader = new StreamReader(clientStream, Encoding.UTF8, false, 128, true))
+                    // HTTP header
+                    Match httpHeader = httpHeaderRegex.Match(line);
+                    if (!httpHeader.Success)
+                        throw new Exception("Not a valid HTTP request");
+
+                    method = httpHeader.Groups["Method"].Value.ToUpper();
+                    url = httpHeader.Groups["Url"].Value;
+
+                    // Process headers
+                    int? contentLength = null;
+
+                    while (true)
                     {
-                        string line = requestReader.ReadLine();
+                        line = requestReader.ReadLine();
+                        if (string.IsNullOrEmpty(line))
+                            break;
 
-                        // HTTP header
-                        Match httpHeader = httpHeaderRegex.Match(line);
-                        if (!httpHeader.Success)
-                            throw new Exception("Not a valid HTTP request");
+                        Match header = headerRegex.Match(line);
+                        if (!header.Success)
+                            throw new Exception("Could not parse request headers");
 
-                        method = httpHeader.Groups["Method"].Value.ToUpper();
-                        url = httpHeader.Groups["Url"].Value;
-
-                        // Process headers
-                        int? contentLength = null;
-
-                        while (true)
+                        switch (header.Groups[1].Value)
                         {
-                            line = requestReader.ReadLine();
-                            if (string.IsNullOrEmpty(line))
-                                break;
-
-                            Match header = headerRegex.Match(line);
-                            if (!header.Success)
-                                throw new Exception("Could not parse request headers");
-
-                            switch (header.Groups[1].Value)
-                            {
-                                case "Content-Length": contentLength = int.Parse(header.Groups[2].Value); break;
-                            }
-                        }
-
-                        if (contentLength != null && contentLength > 0)
-                        {
-                            // Decode request document
-                            char[] requestContentChars = new char[contentLength.Value];
-                            requestReader.ReadBlock(requestContentChars, 0, contentLength.Value);
-                            string requestContent = new string(requestContentChars);
-                            requestDocument = XDocument.Parse(requestContent);
+                            case "Content-Length": contentLength = int.Parse(header.Groups[2].Value); break;
                         }
                     }
 
-                    // Build a reponse
-                    XDocument responseDocument = null;
-
-                    // Process request
-                    if (method == "GET")
+                    if (contentLength != null && contentLength > 0)
                     {
-                        // Find the specified object
-                        string name = url.Substring(1);
+                        // Decode request document
+                        char[] requestContentChars = new char[contentLength.Value];
+                        requestReader.ReadBlock(requestContentChars, 0, contentLength.Value);
+                        string requestContent = new string(requestContentChars);
+                        requestDocument = XDocument.Parse(requestContent);
+                    }
+                }
+
+                // Build a reponse
+                XDocument responseDocument = null;
+
+                // Process request
+                if (method == "GET")
+                {
+                    // Find the specified object
+                    string name = url.Substring(1);
+
+                    if (name.StartsWith("Delegate/"))
+                    {
+                        name = name.Substring(9);
+
+                        RemoteId delegateId;
+                        if (!RemoteId.TryParse(name, out delegateId))
+                            throw new Exception("Could not parse delegate id");
+
+                        responseDocument = ProcessDelegate(delegateId);
+                    }
+                    else
+                    {
                         RemoteObject target;
                         if (!baseObjects.TryGetValue(name, out target))
                             throw new Exception("Could not find the specified object");
@@ -188,52 +266,59 @@ namespace Remoting.Http
 
                         responseDocument = ProcessGet(id, target);
                     }
-                    else
-                    {
-                        string idString = url.Substring(1);
-                        RemoteId id = RemoteId.Parse(idString);
-
-                        RemoteObject target;
-                        if (!remoteObjects.TryGetValue(id, out target))
-                            throw new Exception("Could not find the specified object in remote objects");
-
-                        switch (requestDocument.Root.Name.LocalName)
-                        {
-                            case "Call": responseDocument = ProcessCall(id, target, requestDocument); break;
-
-                            default:
-                                throw new Exception("Unhandled request type");
-                        }
-                    }
-
-                    using (StreamWriter responseWriter = new StreamWriter(clientStream))
-                    {
-                        responseWriter.NewLine = "\r\n";
-
-                        responseWriter.WriteLine("HTTP/1.1 200 OK");
-                        responseWriter.WriteLine("Connection: Closed");
-                        responseWriter.WriteLine();
-
-                        responseWriter.WriteLine(responseDocument.ToString());
-                    }
                 }
-                catch (Exception e)
+                else
                 {
-                    using (StreamWriter responseWriter = new StreamWriter(clientStream))
+                    string idString = url.Substring(1);
+                    RemoteId id = RemoteId.Parse(idString);
+
+                    RemoteObject target;
+                    if (!remoteObjects.TryGetValue(id, out target))
+                        throw new Exception("Could not find the specified object in remote objects");
+
+                    switch (requestDocument.Root.Name.LocalName)
                     {
-                        responseWriter.NewLine = "\r\n";
+                        case "Call": responseDocument = ProcessCall(id, target, requestDocument); break;
 
-                        responseWriter.WriteLine("HTTP/1.1 400 Bad Request");
-                        responseWriter.WriteLine("Connection: Closed");
-                        responseWriter.WriteLine();
-
-                        responseWriter.WriteLine(e.ToString());
+                        default:
+                            throw new Exception("Unhandled request type");
                     }
                 }
-                finally
+
+                using (StreamWriter responseWriter = new StreamWriter(clientStream))
                 {
-                    clientStream.Close();
+                    string response = responseDocument.ToString();
+
+                    responseWriter.NewLine = "\r\n";
+
+                    responseWriter.WriteLine("HTTP/1.1 200 OK");
+                    responseWriter.WriteLine($"Content-Length: {response.Length}");
+                    responseWriter.WriteLine("Connection: Close");
+                    responseWriter.WriteLine();
+
+                    responseWriter.WriteLine(response);
                 }
+            }
+            catch (Exception e)
+            {
+                using (StreamWriter responseWriter = new StreamWriter(clientStream))
+                {
+                    string response = e.ToString();
+
+                    responseWriter.NewLine = "\r\n";
+
+                    responseWriter.WriteLine("HTTP/1.1 400 Bad Request");
+                    responseWriter.WriteLine($"Content-Length: {response.Length}");
+                    responseWriter.WriteLine("Connection: Close");
+                    responseWriter.WriteLine();
+
+                    responseWriter.WriteLine(response);
+                }
+            }
+            finally
+            {
+                clientStream.Flush();
+                clientStream.Dispose();
             }
         }
 
@@ -274,6 +359,8 @@ namespace Remoting.Http
                 {
                     if (methodParameters[i].ParameterType.IsValueType)
                         continue;
+                    if (typeof(Delegate).IsAssignableFrom(methodParameters[i].ParameterType))
+                        continue;
 
                     responseDocument.Root.Add(new XElement("Parameter", new XAttribute("Index", i), serializer.WrapObject(methodArgs[i])));
                 }
@@ -281,6 +368,28 @@ namespace Remoting.Http
             catch (Exception e)
             {
                 responseDocument = new XDocument(serializer.WrapException(e));
+            }
+
+            return responseDocument;
+        }
+        private XDocument ProcessDelegate(RemoteId id)
+        {
+            XDocument responseDocument = new XDocument(new XElement("Result"));
+
+            Delegate remoteDelegate;
+            if (!remoteDelegates.TryGetValue(id, out remoteDelegate))
+                return responseDocument; // throw new Exception("Could not find the specified delegate in remote delegates");
+
+            Queue<object[]> remoteDelegateCalls;
+            if (remoteDelegatesCalls.TryGetValue(id, out remoteDelegateCalls))
+            {
+                while (remoteDelegateCalls.Count == 0)
+                    Thread.Sleep(500);
+
+                object[] parameters = remoteDelegateCalls.Dequeue();
+
+                for (int i = 0; i < parameters.Length; i++)
+                    responseDocument.Root.Add(new XElement("Parameter", new XAttribute("Index", i), serializer.WrapObject(parameters[i])));
             }
 
             return responseDocument;
