@@ -12,9 +12,13 @@ namespace Android.Utilities
     {
         protected ISharedPreferences Preferences { get; }
 
+        private Dictionary<string, object> preferenceCache = new Dictionary<string, object>();
+
         protected void SetValue<T>(T value, [CallerMemberName]string name = null)
         {
             ISharedPreferencesEditor editor = Preferences.Edit();
+
+            preferenceCache.Remove(name);
 
             Type type = typeof(T);
             string key = "Config." + name;
@@ -26,6 +30,12 @@ namespace Android.Utilities
             else if (type == typeof(string)) editor.PutString(key, (string)(object)value);
             else if (typeof(ICollection<string>).IsAssignableFrom(type)) editor.PutStringSet(key, (ICollection<string>)value);
             else if (type == typeof(Android.Net.Uri)) editor.PutString(key, (value as Android.Net.Uri)?.ToString());
+            else if (type == typeof(byte[]))
+            {
+                byte[] bytes = (byte[])(object)value;
+                string data = bytes == null ? null : Convert.ToBase64String(bytes);
+                editor.PutString(key, data);
+            }
             else
                 throw new NotSupportedException("Could not write the specified preference type");
 
@@ -49,8 +59,25 @@ namespace Android.Utilities
                 string uri = Preferences.GetString(key, (defaultValue as Android.Net.Uri)?.ToString());
                 return (T)(object)(uri != null ? Android.Net.Uri.Parse(uri) : null);
             }
+            else if (type == typeof(byte[]))
+            {
+                string data = Preferences.GetString(key, null);
+                return data != null ? (T)(object)Convert.FromBase64String(data) : defaultValue;
+            }
             else
                 throw new NotSupportedException("Could not read the specified preference type");
+        }
+        protected T CacheValue<T>(T defaultValue, [CallerMemberName]string name = null)
+        {
+            object result;
+
+            if (!preferenceCache.TryGetValue(name, out result))
+            {
+                result = GetValue(defaultValue, name);
+                preferenceCache.Add(name, result);
+            }
+
+            return (T)result;
         }
 
         protected BaseConfig(Context context)
