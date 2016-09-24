@@ -58,6 +58,9 @@ namespace Android.Utilities
         {
             foreach (PropertyInfo property in Configuration.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance))
             {
+                if (property.GetCustomAttribute<BrowsableAttribute>()?.Browsable == false)
+                    continue;
+
                 Preference preference = CreatePreference(property);
                 if (preference == null)
                     continue;
