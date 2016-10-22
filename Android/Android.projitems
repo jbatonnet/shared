@@ -15,6 +15,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)BaseConfig.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Components\TopAlignedImageView.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Data\AndroidDatabaseConnection.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Extensions\Bundle.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Extensions\ContextWrapper.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Graphics\Drawables\Drawable.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Layout\DividerItemDecoration.cs" />

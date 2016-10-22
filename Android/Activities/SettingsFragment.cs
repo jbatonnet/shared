@@ -11,8 +11,11 @@ namespace Android.Utilities
 {
     public class SettingsFragment : PreferenceFragment
     {
-        public BaseConfig Configuration { get; }
+        private static Dictionary<int, BaseConfig> savedConfig = new Dictionary<int, BaseConfig>();
 
+        public BaseConfig Configuration { get; private set; }
+
+        public SettingsFragment() { }
         public SettingsFragment(BaseConfig configuration)
         {
             Configuration = configuration;
@@ -20,11 +23,28 @@ namespace Android.Utilities
 
         public override View OnCreateView(LayoutInflater inflater, ViewGroup container, Bundle savedInstanceState)
         {
+            if (savedInstanceState?.ContainsKey(nameof(Configuration)) == true)
+            {
+                int hash = savedInstanceState.GetInt(nameof(Configuration));
+
+                BaseConfig configuration;
+                if (savedConfig.TryGetValue(hash, out configuration))
+                    Configuration = configuration;
+            }
+
             PreferenceScreen = PreferenceManager.CreatePreferenceScreen(inflater.Context);
 
             OnAddPreferences(PreferenceScreen);
 
             return base.OnCreateView(inflater, container, savedInstanceState);
+        }
+        public override void OnSaveInstanceState(Bundle outState)
+        {
+            base.OnSaveInstanceState(outState);
+
+            int hash = Configuration.GetHashCode();
+            savedConfig[hash] = Configuration;
+            outState.PutInt(nameof(Configuration), hash);
         }
         public override void OnResume()
         {

@@ -12,75 +12,120 @@ namespace System
 {
     public class Association<TLeft, TRight>
     {
-        public IEnumerable<TLeft> Left
-        {
-            get
-            {
-                return leftToRight.Keys;
-            }
-        }
-        public IEnumerable<TRight> Right
-        {
-            get
-            {
-                return rightToLeft.Keys;
-            }
-        }
+        public IEnumerable<TLeft> Left => leftValues;
+        public IEnumerable<TRight> Right => rightValues;
+        public int Count => leftValues.Count;
 
         public TRight this[TLeft left]
         {
             get
             {
-                return leftToRight[left];
+                lock (mutex)
+                {
+                    int index = leftValues.IndexOf(left);
+                    if (index == -1)
+                        throw new ArgumentException();
+
+                    return rightValues[index];
+                }
             }
             set
             {
-                TRight oldRight;
+                lock (mutex)
+                {
+                    int index = leftValues.IndexOf(left);
 
-                if (leftToRight.TryGetValue(left, out oldRight))
-                    rightToLeft.Remove(oldRight);
-
-                leftToRight[left] = value;
-                rightToLeft[value] = left;
+                    if (index == -1)
+                    {
+                        leftValues.Add(left);
+                        rightValues.Add(value);
+                    }
+                    else
+                        rightValues[index] = value;
+                }
             }
         }
         public TLeft this[TRight right]
         {
             get
             {
-                return rightToLeft[right];
+                lock (mutex)
+                {
+                    int index = rightValues.IndexOf(right);
+                    if (index == -1)
+                        throw new ArgumentException();
+
+                    return leftValues[index];
+                }
             }
             set
             {
-                TLeft oldLeft;
+                lock (mutex)
+                {
+                    int index = rightValues.IndexOf(right);
 
-                if (rightToLeft.TryGetValue(right, out oldLeft))
-                    leftToRight.Remove(oldLeft);
-
-                rightToLeft[right] = value;
-                leftToRight[value] = right;
+                    if (index == -1)
+                    {
+                        rightValues.Add(right);
+                        leftValues.Add(value);
+                    }
+                    else
+                        leftValues[index] = value;
+                }
             }
         }
 
-        private Dictionary<TLeft, TRight> leftToRight = new Dictionary<TLeft, TRight>();
-        private Dictionary<TRight, TLeft> rightToLeft = new Dictionary<TRight, TLeft>();
-
+        private List<TLeft> leftValues = new List<TLeft>();
+        private List<TRight> rightValues = new List<TRight>();
+        private object mutex = new object();
+        
         public void Add(TLeft left, TRight right)
         {
-            if (leftToRight.ContainsKey(left))
-                throw new NotSupportedException();
+            lock (mutex)
+            {
+                if (leftValues.Contains(left))
+                    throw new NotSupportedException();
 
-            leftToRight[left] = right;
-            rightToLeft[right] = left;
+                leftValues.Add(left);
+                rightValues.Add(right);
+            }
         }
 
         public bool TryGetLeft(TRight right, out TLeft left)
         {
-            return rightToLeft.TryGetValue(right, out left);
+            lock (mutex)
+            {
+                int index = rightValues.IndexOf(right);
+
+                if (index == -1)
+                {
+                    left = default(TLeft);
+                    return false;
+                }
+                else
+                {
+                    left = leftValues[index];
+                    return true;
+                }
+            }
         }
         public bool TryGetRight(TLeft left, out TRight right)
         {
-            return leftToRight.TryGetValue(left, out right);
+            lock (mutex)
+            {
+                int index = leftValues.IndexOf(left);
+
+                if (index == -1)
+                {
+                    right = default(TRight);
+                    return false;
+                }
+                else
+                {
+                    right = rightValues[index];
+                    return true;
+                }
+            }
         }
     }
 }

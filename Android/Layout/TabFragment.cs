@@ -34,6 +34,7 @@ namespace Android.Utilities
             base.OnActivityCreated(savedInstanceState);
 
             OnGotFocus();
+            OnLostFocus();
         }
         protected virtual void OnGotFocus() { }
         protected virtual void OnLostFocus() { }

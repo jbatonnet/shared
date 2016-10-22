@@ -14,6 +14,23 @@ namespace Android.Utilities
 
         private Dictionary<string, object> preferenceCache = new Dictionary<string, object>();
 
+        protected BaseConfig(Context context)
+        {
+            Preferences = context.GetSharedPreferences(BaseApplication.Instance.Name + ".conf", FileCreationMode.Private);
+        }
+        protected BaseConfig(Context context, FileCreationMode mode)
+        {
+            Preferences = context.GetSharedPreferences(BaseApplication.Instance.Name + ".conf", mode);
+        }
+        protected BaseConfig(Context context, string name)
+        {
+            Preferences = context.GetSharedPreferences(name + ".conf", FileCreationMode.Private);
+        }
+        protected BaseConfig(Context context, string name, FileCreationMode mode)
+        {
+            Preferences = context.GetSharedPreferences(name + ".conf", mode);
+        }
+
         protected void SetValue<T>(T value, [CallerMemberName]string name = null)
         {
             ISharedPreferencesEditor editor = Preferences.Edit();
@@ -78,23 +95,6 @@ namespace Android.Utilities
             }
 
             return (T)result;
-        }
-
-        protected BaseConfig(Context context)
-        {
-            Preferences = context.GetSharedPreferences(BaseApplication.Instance.Name + ".conf", FileCreationMode.Private);
-        }
-        protected BaseConfig(Context context, FileCreationMode mode)
-        {
-            Preferences = context.GetSharedPreferences(BaseApplication.Instance.Name + ".conf", mode);
-        }
-        protected BaseConfig(Context context, string name)
-        {
-            Preferences = context.GetSharedPreferences(name + ".conf", FileCreationMode.Private);
-        }
-        protected BaseConfig(Context context, string name, FileCreationMode mode)
-        {
-            Preferences = context.GetSharedPreferences(name + ".conf", mode);
         }
     }
 }
